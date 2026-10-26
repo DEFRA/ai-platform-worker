@@ -88,7 +88,11 @@ export GITHUB_APP_ID=... GITHUB_APP_INSTALLATION_ID=... GITHUB_APP_PRIVATE_KEY=.
 npm run dev
 ```
 
-`GET http://localhost:3001/health` is `200` while the consumer runs and `503` once it has stopped. The backend's local run (`TENANT_ORCHESTRATOR=sqs` with the same queue URLs) sends it commands. The queues are created by `compose/floci/start.d/10-setup-resources.sh`, the same four CDP creates (FIFO, no content-based deduplication, dead-letter after 3 receives). Automated tests never use Floci or the network: GitHub and SQS are faked (see [testing.instructions.md](.github/instructions/testing.instructions.md)).
+`GET http://localhost:3001/health` is `200` while the consumer runs and `503` once it has stopped. The backend's local run (`TENANT_ORCHESTRATOR=sqs` with the same queue URLs) sends it commands. The queues are created by `compose/floci/start.d/10-setup-resources.sh`, the same four CDP creates (FIFO, no content-based deduplication, dead-letter after 3 receives). Automated tests never use the network: GitHub and SQS are faked (see [testing.instructions.md](.github/instructions/testing.instructions.md)). An opt-in suite, `src/commands/commands-consumer.floci.test.js`, proves the FIFO behaviour `sqs-consumer` does not test (order in a message group, deduplication, the dead-letter queue after three receives) against Floci; it is skipped unless `FLOCI_ENDPOINT` is set and never runs in CI:
+
+```bash
+FLOCI_ENDPOINT=http://localhost:4566 npx vitest run src/commands/commands-consumer.floci.test.js
+```
 
 ## Observability
 
