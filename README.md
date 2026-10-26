@@ -133,7 +133,7 @@ npm test                                      # on Windows: $env:TZ='UTC'; npx v
 
 Coverage thresholds are 95 on lines, functions, branches and statements. `npm run security-audit` blocks on critical findings. Conventions, architecture and review rules are in [.github/copilot-instructions.md](.github/copilot-instructions.md); message rules in [message-contracts.instructions.md](.github/instructions/message-contracts.instructions.md). On Windows, `.gitattributes` keeps files LF so `format:check` matches CI.
 
-Docker: `docker build --no-cache --tag ai-platform-worker .`. Dependabot (`.github/dependabot.yml`) waits seven days after a release. SonarCloud settings are in [sonar-project.properties](./sonar-project.properties).
+Docker: `docker build --no-cache --tag ai-platform-worker .`. `actionlint` older than May 2026 flags `concurrency.queue: max` in `publish.yml` and `publish-hotfix.yml`; GitHub supports it (changelog 7 May 2026), so that finding is a tool false positive until `actionlint` adds the key. Dependabot (`.github/dependabot.yml`) waits seven days after a release. SonarCloud settings are in [sonar-project.properties](./sonar-project.properties).
 
 ## Licence
 
