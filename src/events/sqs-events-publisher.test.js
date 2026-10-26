@@ -4,22 +4,41 @@ import {
   exampleEvent,
   OPERATION_ID
 } from '../../test/fixtures/gitops-messages.js'
+import { createInMemoryEventsPublisher } from '../../test/fakes/in-memory-events-publisher.js'
+import { describeEventsPublisherContract } from '#/events/events-publisher-contract.js'
 import { createSqsEventsPublisher } from '#/events/sqs-events-publisher.js'
 import { createSqsClient } from '#/sqs/sqs-client.js'
 
 const QUEUE_URL = 'http://floci:4566/000000000000/aip-gitops-events.fifo'
-const NO_WAIT = { sleep: async () => {}, random: () => 0 }
+
+describeEventsPublisherContract('in-memory fake', () => {
+  const fake = createInMemoryEventsPublisher()
+
+  return { publisher: fake, published: () => fake.events }
+})
+
+describeEventsPublisherContract('SQS adapter', () => {
+  const sent = []
+  const client = {
+    // A send the signal has aborted never reaches the queue.
+    send: vi.fn(async (command, { abortSignal } = {}) => {
+      abortSignal?.throwIfAborted()
+      sent.push(JSON.parse(command.input.MessageBody))
+    })
+  }
+
+  return {
+    publisher: createSqsEventsPublisher({ client, queueUrl: QUEUE_URL }),
+    published: () => sent
+  }
+})
 
 function setup(send = vi.fn().mockResolvedValue({})) {
   const client = { send }
 
   return {
     client,
-    publisher: createSqsEventsPublisher({
-      client,
-      queueUrl: QUEUE_URL,
-      retryOptions: NO_WAIT
-    })
+    publisher: createSqsEventsPublisher({ client, queueUrl: QUEUE_URL })
   }
 }
 
@@ -59,21 +78,7 @@ describe('#sqs-events-publisher', () => {
     expect(client.send).not.toHaveBeenCalled()
   })
 
-  test('tries a send again after a transient failure', async () => {
-    const send = vi
-      .fn()
-      .mockRejectedValueOnce(
-        Object.assign(new Error('down'), { $metadata: {}, status: 503 })
-      )
-      .mockResolvedValue({})
-    const { publisher } = setup(send)
-
-    await publisher.publish(exampleEvent('requested'))
-
-    expect(send).toHaveBeenCalledTimes(2)
-  })
-
-  test('propagates a failure that is not transient, so SQS redelivers the command', async () => {
+  test('propagates a failure, so SQS redelivers the command', async () => {
     const error = Object.assign(new Error('denied'), { status: 403 })
     const { publisher } = setup(vi.fn().mockRejectedValue(error))
 

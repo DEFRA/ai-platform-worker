@@ -15,7 +15,7 @@ The worker never decides, commits or watches runs on a timer. The backend owns t
   - `src/worker-runtime.js` is the one composition root; `src/plugins/gitops-worker.js` runs it inside Hapi; `/health` is the only route
 - **Handlers return an outcome string and throw on failure.** A throw leaves the message on the queue, SQS redelivers it, and after three receives it reaches the dead-letter queue (AC8).
 - **Idempotent by finding first.** `submit` looks for a run with `({operationId})` in its name created since the command before it dispatches; `apply` finds its run by the command ID in the run name. A redelivered command dispatches nothing (AC3).
-- **Every outbound call takes the handler's `AbortSignal`** (`HANDLER_TIMEOUT_MS`, 30 s); reads retry transient errors with backoff and jitter, a dispatch is never retried inside a handler.
+- **Every outbound call takes the handler's `AbortSignal`** (`HANDLER_TIMEOUT_MS`, 30 s); GitHub reads retry transient errors with backoff and jitter (`src/common/helpers/retry.js`), SQS sends use the AWS SDK's standard retry, and a dispatch is never retried inside a handler.
 
 ## Build and Test
 

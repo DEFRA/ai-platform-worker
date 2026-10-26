@@ -53,4 +53,34 @@ describe('#config', () => {
 
     vi.unstubAllEnvs()
   })
+
+  test('in production logs ECS JSON, redacts headers and still redacts documents and requesters', async () => {
+    vi.resetModules()
+    vi.stubEnv('NODE_ENV', 'production')
+
+    const { config: fresh } = await import('#/config.js')
+
+    expect(fresh.get('log.format')).toBe('ecs')
+    expect(fresh.get('log.isEnabled')).toBe(true)
+    expect(fresh.get('log.redact')).toEqual(
+      expect.arrayContaining([
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'res.headers',
+        'document',
+        '*.requestedBy',
+        '*.token'
+      ])
+    )
+
+    vi.unstubAllEnvs()
+  })
+
+  test('in test logs nothing by default and pretty-prints when enabled', () => {
+    expect(config.get('log.isEnabled')).toBe(false)
+    expect(config.get('log.format')).toBe('pino-pretty')
+    expect(config.get('log.redact')).toEqual(
+      expect.arrayContaining(['req', 'res', 'document', 'requestedBy'])
+    )
+  })
 })

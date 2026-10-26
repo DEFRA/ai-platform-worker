@@ -34,6 +34,19 @@ describe('#exitOnUnhandledRejection', () => {
     expect(exit).toHaveBeenCalledWith(1)
   })
 
+  test('exits through process.exit by default', () => {
+    const target = new EventEmitter()
+    const logger = { fatal: vi.fn() }
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined)
+
+    exitOnUnhandledRejection({ logger, target })
+    target.emit('unhandledRejection', new Error('boom'))
+
+    expect(exit).toHaveBeenCalledWith(1)
+
+    exit.mockRestore()
+  })
+
   test('registers on the process, with the shared logger, by default', () => {
     const on = vi.spyOn(process, 'on').mockImplementation(() => process)
 

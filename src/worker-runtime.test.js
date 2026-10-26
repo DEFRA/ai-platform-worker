@@ -1,6 +1,7 @@
 import {
   DEPLOYMENTS_REPO,
-  TENANTS_REPO
+  TENANTS_REPO,
+  exampleCommand
 } from '../test/fixtures/gitops-messages.js'
 import { createFakeLogger } from '../test/fakes/fake-logger.js'
 import { createFakeMetrics } from '../test/fakes/fake-metrics.js'
@@ -139,6 +140,33 @@ describe('#worker-runtime', () => {
         }
       )
     ).toThrow(/GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID/)
+  })
+
+  test('hands each handler a client scoped to the repository it works on', async () => {
+    const { createAppClient, createConsumer } = build()
+    const request = vi.fn().mockResolvedValue({ data: { workflow_runs: [] } })
+
+    createAppClient.mockReturnValue({ request })
+
+    createConsumer.mockClear()
+    createWorkerRuntime(
+      { logger: createFakeLogger(), metrics: createFakeMetrics() },
+      {
+        settings: SETTINGS,
+        createClient: vi.fn().mockReturnValue({ send: vi.fn() }),
+        createAppClient,
+        createConsumer
+      }
+    )
+
+    const { handling } = createConsumer.mock.calls[0][0]
+
+    await handling.handlers.submit(exampleCommand(), {})
+
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining('/runs'),
+      expect.objectContaining({ owner: 'DEFRA', repo: 'ai-platform-tenants' })
+    )
   })
 
   test('reads its settings from configuration by default', () => {

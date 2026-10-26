@@ -1,8 +1,11 @@
 import { Writable } from 'node:stream'
 
 import { pino } from 'pino'
+import { getTraceId } from '@defra/hapi-tracing'
 
 import { loggerOptions } from '#/plugins/logger-options.js'
+
+vi.mock('@defra/hapi-tracing', () => ({ getTraceId: vi.fn() }))
 
 function capture() {
   const lines = []
@@ -48,5 +51,9 @@ describe('#logger-options', () => {
 
   test('adds the trace ID of the request to a log line when there is one', () => {
     expect(loggerOptions.mixin()).toEqual({})
+
+    getTraceId.mockReturnValueOnce('3f2b8d1c')
+
+    expect(loggerOptions.mixin()).toEqual({ trace: { id: '3f2b8d1c' } })
   })
 })
