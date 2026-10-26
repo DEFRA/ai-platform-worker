@@ -2,6 +2,7 @@ import { Octokit } from 'octokit'
 import { createAppAuth } from '@octokit/auth-app'
 
 import { config } from '#/config.js'
+import { APPLY_WORKFLOW, SUBMIT_WORKFLOW } from '#/github/github-client.js'
 
 /**
  * GitHub's REST API version, pinned on every request so a change of GitHub's
@@ -32,6 +33,7 @@ const READ_METHODS = new Set(['GET', 'HEAD'])
 const ALLOWED_WRITE_ROUTES = new Set([
   'POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches'
 ])
+const ALLOWED_WORKFLOWS = new Set([SUBMIT_WORKFLOW, APPLY_WORKFLOW])
 
 function assertScope(repositoryNames, permissions) {
   if (
@@ -106,9 +108,18 @@ function refuseUnlistedWrites(octokit) {
   octokit.hook.before('request', (options) => {
     const route = `${options.method} ${options.url}`
 
-    if (!READ_METHODS.has(options.method) && !ALLOWED_WRITE_ROUTES.has(route)) {
+    // The one write is a dispatch of `submit.yml` or `apply.yml`: the App is
+    // exempt from the workflows' admin check, so the worker must never start
+    // `pause.yml`, `reconcile-all.yml` or any other workflow.
+    if (
+      !READ_METHODS.has(options.method) &&
+      !(
+        ALLOWED_WRITE_ROUTES.has(route) &&
+        ALLOWED_WORKFLOWS.has(options.workflow_id)
+      )
+    ) {
       const error = new Error(
-        `The worker's GitHub client may only read and dispatch workflows; refused ${route}`
+        `The worker's GitHub client may only read and dispatch ${[...ALLOWED_WORKFLOWS].join(' and ')}; refused ${route}`
       )
       error.code = 'github-write-refused'
       throw error

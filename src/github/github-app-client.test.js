@@ -131,6 +131,40 @@ describe('#github-app-client', () => {
       )
     })
 
+    test.each(['submit.yml', 'apply.yml'])(
+      'allows a dispatch of %s',
+      async (workflow) => {
+        const { client } = setup()
+
+        const response = await client.request(DISPATCH, {
+          owner: 'DEFRA',
+          repo: 'ai-platform-tenants',
+          workflow_id: workflow,
+          ref: 'main'
+        })
+
+        expect(response.status).toBe(204)
+      }
+    )
+
+    test.each(['pause.yml', 'reconcile-all.yml', 'validate.yml', '12345'])(
+      'R2-F6: refuses a dispatch of %s, because the App is exempt from the admin check and the worker dispatches submit and apply only',
+      async (workflow) => {
+        const { client, github, tokens } = setup()
+
+        await expect(
+          client.request(DISPATCH, {
+            owner: 'DEFRA',
+            repo: 'ai-platform-tenants',
+            workflow_id: workflow,
+            ref: 'main'
+          })
+        ).rejects.toMatchObject({ code: 'github-write-refused' })
+        expect(tokens).toEqual([])
+        expect(github.requests).toEqual([])
+      }
+    )
+
     test('allows a workflow dispatch, the one write', async () => {
       const { client } = setup()
 
