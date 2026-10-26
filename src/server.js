@@ -8,9 +8,10 @@ import { requestLogger } from '#/plugins/request-logger.js'
 import { failAction } from '#/common/helpers/fail-action.js'
 import { pulse } from '#/plugins/pulse.js'
 import { requestTracing } from '#/plugins/request-tracing.js'
+import { gitopsWorker } from '#/plugins/gitops-worker.js'
 import { metrics } from '@defra/cdp-metrics'
 
-export async function createServer() {
+export async function createServer({ worker = gitopsWorker } = {}) {
   const server = Hapi.server({
     host: config.get('host'),
     port: config.get('port'),
@@ -42,13 +43,15 @@ export async function createServer() {
   // requestTracing - trace header logging and propagation
   // secureContext  - loads CA certificates from environment config
   // pulse          - provides shutdown handlers
-  // router         - routes used in the app
+  // gitopsWorker   - the commands consumer: starts after the server, stops in onPreStop
+  // router         - routes used in the app (only /health)
   await server.register([
     requestLogger,
     requestTracing,
     metrics,
     secureContext,
     pulse,
+    worker,
     router
   ])
 

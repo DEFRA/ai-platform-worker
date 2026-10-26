@@ -6,6 +6,16 @@ describe('#startServer', () => {
   let startServerImport
   let createServerImport
 
+  // The worker plugin is replaced: a real one needs queues and App credentials.
+  const worker = {
+    plugin: {
+      name: 'gitops-worker',
+      register(server) {
+        server.decorate('server', 'gitopsConsumer', { isRunning: true })
+      }
+    }
+  }
+
   beforeAll(async () => {
     vi.stubEnv('PORT', '3098')
     createServerImport = await import('#/server.js')
@@ -21,10 +31,12 @@ describe('#startServer', () => {
 
   describe('When server starts', () => {
     test('Should start up server as expected', async () => {
-      await startServerImport.startServer()
+      const server = await startServerImport.startServer({ worker })
 
-      expect(createServerSpy).toHaveBeenCalled()
+      expect(createServerSpy).toHaveBeenCalledWith({ worker })
       expect(hapiServerSpy).toHaveBeenCalled()
+
+      await server.stop()
     })
   })
 
