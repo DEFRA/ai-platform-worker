@@ -19,6 +19,7 @@ import { createSqsClient } from '#/sqs/sqs-client.js'
 // check-pull-request.yml runs it against a Floci service container.
 const endpoint = process.env.FLOCI_ENDPOINT
 const ALLOWED = new Set(['DEFRA/ai-platform-tenants'])
+const VISIBILITY_TIMEOUT_SECONDS = 1
 
 describe.skipIf(!endpoint)('commands consumer on Floci (FIFO)', () => {
   const sqs = createSqsClient({ endpoint })
@@ -74,6 +75,10 @@ describe.skipIf(!endpoint)('commands consumer on Floci (FIFO)', () => {
         metrics: createFakeMetrics()
       },
       settings: {
+        // The consumer sets the visibility of every message it receives, which
+        // overrides the queue's: without this the three redeliveries of AC8
+        // take three minutes, not three seconds.
+        visibilityTimeoutSeconds: VISIBILITY_TIMEOUT_SECONDS,
         waitTimeSeconds: 1,
         handlerTimeoutMs: 5000,
         shutdownWaitMs: 5000
@@ -88,7 +93,7 @@ describe.skipIf(!endpoint)('commands consumer on Floci (FIFO)', () => {
 
     deadLetterUrl = await createFifo(`aip-test-dlq-${suffix}.fifo`)
     queueUrl = await createFifo(`aip-test-${suffix}.fifo`, {
-      VisibilityTimeout: '1',
+      VisibilityTimeout: String(VISIBILITY_TIMEOUT_SECONDS),
       RedrivePolicy: JSON.stringify({
         deadLetterTargetArn: await arnOf(deadLetterUrl),
         maxReceiveCount: '3'

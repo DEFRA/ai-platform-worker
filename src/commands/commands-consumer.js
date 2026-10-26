@@ -132,7 +132,7 @@ export function createMessageHandler({
  * @param {string} deps.queueUrl
  * @param {import('@aws-sdk/client-sqs').SQSClient} deps.sqs
  * @param {Parameters<typeof createMessageHandler>[0]} deps.handling
- * @param {{waitTimeSeconds: number, handlerTimeoutMs: number, shutdownWaitMs: number, errorPauseMs?: number}} deps.settings
+ * @param {{waitTimeSeconds: number, handlerTimeoutMs: number, shutdownWaitMs: number, errorPauseMs?: number, visibilityTimeoutSeconds?: number}} deps.settings
  * @param {import('pino').Logger} deps.logger
  * @param {typeof Consumer.create} [deps.createConsumer]
  * @returns {{start: () => void, stop: () => Promise<void>, isRunning: boolean}}
@@ -152,7 +152,8 @@ export function createCommandsConsumer({
     suppressFifoWarning: true,
     alwaysAcknowledge: true,
     waitTimeSeconds: settings.waitTimeSeconds,
-    visibilityTimeout: VISIBILITY_TIMEOUT_SECONDS,
+    visibilityTimeout:
+      settings.visibilityTimeoutSeconds ?? VISIBILITY_TIMEOUT_SECONDS,
     authenticationErrorTimeout: settings.errorPauseMs ?? DEFAULT_ERROR_PAUSE_MS,
     handleMessageTimeout: settings.handlerTimeoutMs,
     pollingCompleteWaitTimeMs: settings.shutdownWaitMs,

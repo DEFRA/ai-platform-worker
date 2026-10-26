@@ -401,6 +401,26 @@ describe('#commands-consumer options and events', () => {
     )
   })
 
+  test('takes the visibility timeout from the settings when given, so a test queue can redeliver quickly', () => {
+    const fake = fakeLibrary()
+
+    createCommandsConsumer({
+      queueUrl: QUEUE_URL,
+      sqs: {},
+      handling: {
+        handlers: {},
+        allowedRepositories: ALLOWED,
+        handlerTimeoutMs: 30000,
+        metrics: createFakeMetrics()
+      },
+      settings: { ...SETTINGS, visibilityTimeoutSeconds: 1 },
+      logger: createFakeLogger(),
+      createConsumer: fake.createConsumer
+    })
+
+    expect(fake.created[0].visibilityTimeout).toBe(1)
+  })
+
   test('starts, and stops by aborting the long poll', async () => {
     const { fake, consumer } = build()
 
