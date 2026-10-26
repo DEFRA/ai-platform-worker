@@ -69,10 +69,11 @@ export function createRequestedReconciler({
       if (!run) {
         logger?.warn(
           { commitSha: commit.sha },
-          'A commit names the operation but no submit run does, so nothing could be reported'
+          'A commit names the operation but no submit run does, so submit was dispatched again to report it with a run'
         )
+        await dispatcher.dispatchSubmit(command, { signal })
 
-        return 'unresolved'
+        return 'dispatched'
       }
 
       await publish(
