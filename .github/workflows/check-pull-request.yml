@@ -11,10 +11,19 @@ on:
       - synchronize
       - ready_for_review
 
+# Read-only for every job; nothing here writes to the repository.
+permissions:
+  contents: read
+
 jobs:
   pr-validator:
     name: Run Pull Request Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # SonarCloud reads the pull request it decorates.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -54,9 +63,10 @@ jobs:
   floci:
     name: FIFO queues on Floci
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       floci:
-        image: floci/floci:latest
+        image: floci/floci:2.3.0-compat@sha256:ecfd33bb98d3e0ce0e11d528730f0827c08ab18c9b331865203d67ec65c10c07
         ports:
           - 4566:4566
     env:
