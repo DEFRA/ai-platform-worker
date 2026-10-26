@@ -78,6 +78,7 @@ export function createAppliedReconciler({
 
     const runs = await runReader.findAppliesContaining({
       repository: command.repository,
+      environment: command.environment,
       commit,
       signal
     })

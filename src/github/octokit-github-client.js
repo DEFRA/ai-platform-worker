@@ -12,6 +12,7 @@ const ROUTES = {
   artifacts: 'GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts',
   commits: 'GET /repos/{owner}/{repo}/commits',
   compare: 'GET /repos/{owner}/{repo}/compare/{basehead}',
+  jobs: 'GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs',
   dispatch:
     'POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches'
 }
@@ -184,6 +185,17 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
         message: commit.commit.message,
         committedAt: commit.commit.committer.date
       }))
+    },
+
+    async listRunJobNames({ repository, runId, signal }) {
+      const { data } = await read(
+        repository,
+        ROUTES.jobs,
+        { run_id: runId, per_page: PER_PAGE },
+        signal
+      )
+
+      return data.jobs.map((job) => job.name)
     },
 
     async isAncestor({ repository, ancestor, descendant, signal }) {

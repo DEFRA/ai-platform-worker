@@ -33,6 +33,8 @@
  *   the parsed `run-report-{environment}.json` artifact, or null when the run has no unexpired one
  * @property {(params: {repository: string, path: string, since: string, signal?: AbortSignal}) => Promise<MainCommit[]>} listCommits
  *   the commits on `main` that touched `path` since the time, newest first
+ * @property {(params: {repository: string, runId: number, signal?: AbortSignal}) => Promise<string[]>} listRunJobNames
+ *   the names of a run's jobs (a reusable workflow's job reads `{caller job} / {job}`)
  * @property {(params: {repository: string, ancestor: string, descendant: string, signal?: AbortSignal}) => Promise<boolean>} isAncestor
  *   whether `ancestor` is `descendant` or an ancestor of it
  */

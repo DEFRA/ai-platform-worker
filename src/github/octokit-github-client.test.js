@@ -30,6 +30,7 @@ function createHarness() {
     commits: new Map(),
     reports: new Map(),
     ancestry: new Set(),
+    jobs: new Map(),
     dispatches: []
   }
   let nextRunId = 7001
@@ -120,6 +121,14 @@ function createHarness() {
           }))
       }
     },
+    'GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs': ({ params }) => ({
+      body: {
+        jobs: (
+          state.jobs.get(`${params.owner}/${params.repo}:${params.run_id}`) ??
+          []
+        ).map((name) => ({ name }))
+      }
+    }),
     'GET /repos/{owner}/{repo}/compare/{basehead}': ({ params }) => {
       const [ancestor, descendant] = params.basehead.split('...')
       const repository = `${params.owner}/${params.repo}`
@@ -158,6 +167,8 @@ function createHarness() {
       state.reports.set(`${repository}:${runId}:${environment}`, report),
     seedAncestor: (repository, ancestor, descendant) =>
       state.ancestry.add(`${repository}:${ancestor}:${descendant}`),
+    seedJobs: (repository, runId, names) =>
+      state.jobs.set(`${repository}:${runId}`, names),
     dispatches: () => state.dispatches
   }
 }

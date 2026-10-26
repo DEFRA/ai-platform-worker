@@ -106,15 +106,20 @@ describe('#reconcile handler', () => {
       expect(world.events.events[0].status).toBe('committed')
     })
 
-    test('a commit with no submit run to name: acknowledged, nothing published, a warning', async () => {
+    test('R2-F7: a commit with no submit run to name dispatches submit again, which reports the existing commit with a run', async () => {
       const world = createWorld()
 
       withCommit(world)
 
       await expect(world.reconcile(requested(), context(world))).resolves.toBe(
-        'unresolved'
+        'dispatched'
       )
       expect(world.events.events).toEqual([])
+      expect(world.github.dispatches).toHaveLength(1)
+      expect(world.github.dispatches[0]).toMatchObject({
+        workflowId: 'submit.yml',
+        inputs: { operation_id: OPERATION_ID }
+      })
       expect(world.logger.warn).toHaveBeenCalledTimes(1)
     })
 
@@ -622,6 +627,147 @@ describe('#reconcile handler', () => {
         expect(world.github.calls).toEqual([])
       }
     )
+  })
+
+  describe('R2-F2: an apply run of another environment is not this operation’s apply', () => {
+    const OTHER_ENV_RUN = applyRun({
+      id: 2002,
+      name: 'apply prod portal op-other-0001 0190-other',
+      status: 'in_progress',
+      conclusion: null,
+      headSha: 'b'.repeat(40),
+      createdAt: '2026-10-26T12:10:00Z'
+    })
+    const PUSH_RUN = applyRun({
+      id: 2001,
+      name: 'apply changed environments ',
+      createdAt: '2026-10-26T12:01:00Z'
+    })
+
+    function seedProbe(world) {
+      withCommit(world)
+      world.github.seedAncestor(TENANTS_REPO, SHA, 'b'.repeat(40))
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+        OTHER_ENV_RUN,
+        PUSH_RUN
+      ])
+      world.github.seedJobs(TENANTS_REPO, 2001, ['apply / infradev'])
+      world.github.seedReport(TENANTS_REPO, 2001, 'infradev', {
+        outcome: 'success',
+        appliedSha: SHA,
+        operations: OPERATIONS
+      })
+    }
+
+    test('a running apply for prod does not hide the infradev run that deployed the operation (the reviewer’s probe)', async () => {
+      const world = createWorld()
+
+      seedProbe(world)
+
+      await expect(world.reconcile(committed(), context(world))).resolves.toBe(
+        'deployed'
+      )
+      expect(world.events.events[0]).toMatchObject({
+        status: 'deployed',
+        runId: 2001,
+        environment: 'infradev'
+      })
+    })
+
+    test('an apply for another environment is never reported as deploying, and a fresh apply is dispatched', async () => {
+      const world = createWorld()
+
+      withCommit(world)
+      world.github.seedAncestor(TENANTS_REPO, SHA, 'b'.repeat(40))
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [OTHER_ENV_RUN])
+
+      await expect(world.reconcile(committed(), context(world))).resolves.toBe(
+        'dispatched'
+      )
+      expect(world.events.events).toEqual([])
+    })
+
+    test('a push apply that is running and has a job for the environment is this operation’s deploying', async () => {
+      const world = createWorld()
+
+      withCommit(world)
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+        applyRun({
+          id: 2003,
+          name: 'apply changed environments ',
+          status: 'in_progress',
+          conclusion: null
+        })
+      ])
+      world.github.seedJobs(TENANTS_REPO, 2003, [
+        'apply / access',
+        'apply / infradev'
+      ])
+
+      await world.reconcile(committed(), context(world))
+
+      expect(world.events.events[0]).toMatchObject({
+        status: 'deploying',
+        runId: 2003
+      })
+    })
+
+    test('a push apply with jobs for other environments only is not this operation’s', async () => {
+      const world = createWorld()
+
+      withCommit(world)
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+        applyRun({
+          id: 2004,
+          name: 'apply changed environments ',
+          status: 'in_progress',
+          conclusion: null
+        })
+      ])
+      world.github.seedJobs(TENANTS_REPO, 2004, ['apply / prod'])
+
+      await expect(world.reconcile(committed(), context(world))).resolves.toBe(
+        'dispatched'
+      )
+      expect(world.events.events).toEqual([])
+    })
+
+    test('a dispatched apply for the environment needs no job lookup', async () => {
+      const world = createWorld()
+
+      withCommit(world)
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+        applyRun({
+          name: 'apply infradev portal op-x cmd-1',
+          status: 'queued',
+          conclusion: null
+        })
+      ])
+
+      await world.reconcile(committed(), context(world))
+
+      expect(
+        world.github.calls.filter((call) => call.method === 'listRunJobNames')
+      ).toEqual([])
+      expect(world.events.events[0].status).toBe('deploying')
+    })
+
+    test('an environment name that only starts like another is not a match (prod versus prod2)', async () => {
+      const world = createWorld()
+
+      withCommit(world)
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+        applyRun({
+          name: 'apply infradev2 portal op-x cmd-1',
+          status: 'queued',
+          conclusion: null
+        })
+      ])
+
+      await expect(world.reconcile(committed(), context(world))).resolves.toBe(
+        'dispatched'
+      )
+    })
   })
 
   describe('metrics, trace and safety', () => {

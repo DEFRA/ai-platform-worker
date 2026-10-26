@@ -182,6 +182,25 @@ export function describeGitHubClientContract(name, createHarness) {
       })
     })
 
+    describe('listRunJobNames', () => {
+      test('lists the names of the jobs of a run', async () => {
+        harness.seedJobs(REPO, 42, [
+          'apply / infradev',
+          'apply / pause infradev'
+        ])
+
+        await expect(
+          harness.client.listRunJobNames({ repository: REPO, runId: 42 })
+        ).resolves.toEqual(['apply / infradev', 'apply / pause infradev'])
+      })
+
+      test('lists nothing for a run with no jobs', async () => {
+        await expect(
+          harness.client.listRunJobNames({ repository: REPO, runId: 43 })
+        ).resolves.toEqual([])
+      })
+    })
+
     describe('isAncestor', () => {
       test('is true for the same commit and for a descendant', async () => {
         harness.seedAncestor(REPO, 'a'.repeat(40), 'b'.repeat(40))

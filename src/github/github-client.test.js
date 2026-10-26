@@ -10,6 +10,7 @@ describeGitHubClientContract('in-memory fake', () => {
     seedCommits: client.seedCommits,
     seedReport: client.seedReport,
     seedAncestor: client.seedAncestor,
+    seedJobs: client.seedJobs,
     dispatches: () => client.dispatches
   }
 })

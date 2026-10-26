@@ -58,6 +58,7 @@ export function createInMemoryGitHubClient({ firstRunId = 9001 } = {}) {
   const commits = new Map()
   const reports = new Map()
   const ancestry = new Set()
+  const jobs = new Map()
   const dispatches = []
   const calls = []
   const failures = new Map()
@@ -88,6 +89,9 @@ export function createInMemoryGitHubClient({ firstRunId = 9001 } = {}) {
     },
     seedAncestor(repository, ancestor, descendant) {
       ancestry.add(`${repository}:${ancestor}:${descendant}`)
+    },
+    seedJobs(repository, runId, names) {
+      jobs.set(`${repository}:${runId}`, names)
     },
     failNext(method, error) {
       failures.set(method, error)
@@ -137,6 +141,11 @@ export function createInMemoryGitHubClient({ firstRunId = 9001 } = {}) {
           (a, b) => Date.parse(b.committedAt) - Date.parse(a.committedAt)
         )
         .map(({ sha, message, committedAt }) => ({ sha, message, committedAt }))
+    },
+    async listRunJobNames(params) {
+      record('listRunJobNames', params)
+
+      return jobs.get(`${params.repository}:${params.runId}`) ?? []
     },
     async isAncestor(params) {
       record('isAncestor', params)

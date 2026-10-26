@@ -114,22 +114,35 @@ describe('#run-reader', () => {
 
       github.seedAncestor(TENANTS_REPO, SHA, later)
       github.seedRuns(TENANTS_REPO, 'apply.yml', [
-        workflowRun({ id: 1, headSha: SHA, createdAt: '2026-10-26T12:00:30Z' }),
         workflowRun({
+          name: 'apply infradev',
+          id: 1,
+          headSha: SHA,
+          createdAt: '2026-10-26T12:00:30Z'
+        }),
+        workflowRun({
+          name: 'apply infradev',
           id: 2,
           headSha: unrelated,
           createdAt: '2026-10-26T12:10:00Z'
         }),
         workflowRun({
+          name: 'apply infradev',
           id: 3,
           headSha: later,
           createdAt: '2026-10-26T12:20:00Z'
         }),
-        workflowRun({ id: 4, headSha: SHA, createdAt: '2026-10-26T11:00:00Z' })
+        workflowRun({
+          name: 'apply infradev',
+          id: 4,
+          headSha: SHA,
+          createdAt: '2026-10-26T11:00:00Z'
+        })
       ])
 
       const runs = await reader.findAppliesContaining({
         repository: TENANTS_REPO,
+        environment: 'infradev',
         commit: COMMIT
       })
 
@@ -140,11 +153,17 @@ describe('#run-reader', () => {
       const { github, reader } = setup()
 
       github.seedRuns(TENANTS_REPO, 'apply.yml', [
-        workflowRun({ id: 1, headSha: SHA, createdAt: '2026-10-26T12:00:30Z' })
+        workflowRun({
+          name: 'apply infradev',
+          id: 1,
+          headSha: SHA,
+          createdAt: '2026-10-26T12:00:30Z'
+        })
       ])
 
       await reader.findAppliesContaining({
         repository: TENANTS_REPO,
+        environment: 'infradev',
         commit: COMMIT
       })
 
@@ -161,6 +180,7 @@ describe('#run-reader', () => {
         'apply.yml',
         Array.from({ length: 15 }, (_, index) =>
           workflowRun({
+            name: 'apply infradev',
             id: index + 1,
             headSha: SHA,
             createdAt: `2026-10-26T12:${String(index + 10).padStart(2, '0')}:00Z`
@@ -170,6 +190,7 @@ describe('#run-reader', () => {
 
       const runs = await reader.findAppliesContaining({
         repository: TENANTS_REPO,
+        environment: 'infradev',
         commit: COMMIT
       })
 
