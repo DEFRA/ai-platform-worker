@@ -6,6 +6,9 @@ export default defineConfig({
     environment: 'node',
     clearMocks: true,
     fileParallelism: false,
+    // The first import of the server and its plugins is slow on a loaded
+    // machine; hooks get more than the 10 s default.
+    hookTimeout: 60000,
     coverage: {
       provider: 'v8',
       reportsDirectory: './coverage',

@@ -15,7 +15,8 @@ import { createSqsClient } from '#/sqs/sqs-client.js'
 // Proves the FIFO behaviour `sqs-consumer` does not test (plan DD14): order in
 // a message group, deduplication by ID, redelivery and the dead-letter queue
 // after three receives. It needs Floci, so it runs only when FLOCI_ENDPOINT is
-// set (README, "Run locally"): never in CI, never by `npm test` on its own.
+// set (README, "Run locally"): `npm test` skips it, and the `floci` job of
+// check-pull-request.yml runs it against a Floci service container.
 const endpoint = process.env.FLOCI_ENDPOINT
 const ALLOWED = new Set(['DEFRA/ai-platform-tenants'])
 
