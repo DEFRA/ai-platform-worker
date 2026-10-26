@@ -11,6 +11,8 @@
     "dev": "AWS_EMF_ENVIRONMENT=Local NODE_ENV=development npm run server:watch",
     "dev:debug": "AWS_EMF_ENVIRONMENT=Local NODE_ENV=development npm run server:debug",
     "docker:dev": "npm run dev",
+    "contracts:check": "node scripts/contracts.mjs check",
+    "contracts:sync": "node scripts/contracts.mjs sync",
     "format": "prettier --write \"**/*.{cjs,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{cjs,js,json,md}\"",
     "git:pre-commit-hook": "npm run security-audit && npm run format:check && npm run lint && npm test",
