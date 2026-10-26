@@ -201,6 +201,26 @@ describe('#status-mapper', () => {
       })
     })
 
+    test('deploy-failed is not attributable to a team the report does not name as failing', () => {
+      const event = deployFailedEvent(
+        facts({
+          command: COMMITTED,
+          report: {
+            outcome: 'failure',
+            failingTeams: ['beta'],
+            unattributedFailure: false
+          }
+        })
+      )
+
+      expectValid(event)
+      expect(COMMITTED.team).toBe('alpha')
+      expect(event).toMatchObject({
+        failingTeams: ['beta'],
+        attributable: false
+      })
+    })
+
     test('deploy-failed with no failing-team fields in the report is not attributable', () => {
       const event = deployFailedEvent(
         facts({ command: COMMITTED, report: { outcome: 'failure' } })

@@ -147,8 +147,8 @@ export function deployedEvent({ command, run, commit, report, now }) {
 /**
  * `deploy-failed`: the report lists the operation and its outcome is not
  * `success`. A `paused` outcome is the retryable refusal; any other failure
- * is attributable only when the report names failing teams and says the
- * failure was not unattributed, as the workflows decide.
+ * is attributable only when the report names this operation's team as failing
+ * and says the failure was not unattributed, as the workflows decide.
  * @param {{command: object, run: object, commit: {sha: string, committedAt: string}, report: object, now: Date}} facts
  */
 export function deployFailedEvent({ command, run, commit, report, now }) {
@@ -172,7 +172,9 @@ export function deployFailedEvent({ command, run, commit, report, now }) {
         },
     failingTeams,
     attributable:
-      !paused && failingTeams.length > 0 && report.unattributedFailure === false
+      !paused &&
+      failingTeams.includes(command.team) &&
+      report.unattributedFailure === false
   }
 }
 
