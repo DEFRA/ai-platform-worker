@@ -19,6 +19,7 @@ function restRun(run) {
     head_sha: run.headSha,
     run_attempt: run.runAttempt,
     created_at: run.createdAt,
+    updated_at: run.updatedAt,
     html_url: run.htmlUrl
   }
 }

@@ -48,6 +48,7 @@ function toRun(run) {
     headSha: run.head_sha,
     runAttempt: run.run_attempt ?? 1,
     createdAt: run.created_at,
+    updatedAt: run.updated_at ?? run.created_at,
     htmlUrl: run.html_url
   }
 }

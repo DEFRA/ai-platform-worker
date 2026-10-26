@@ -77,6 +77,113 @@ describe('#submit handler', () => {
       expect(world.github.dispatches).toHaveLength(1)
     })
 
+    // The run-name carries the operation, not the command, so a run is told
+    // from an earlier attempt's by time: a retry is created only after the
+    // earlier run's failure, so a run that ended before the command was
+    // created cannot be the command's, however close their creation times.
+    describe('a retry inside the time window of the earlier attempt', () => {
+      const EARLIER_RUN = {
+        id: 77,
+        name: SUBMIT_RUN_NAME,
+        createdAt: '2026-10-26T12:00:05Z'
+      }
+      const retry = () =>
+        exampleCommand({ attempt: 2, createdAt: '2026-10-26T12:00:09Z' })
+
+      test('dispatches when the earlier run, created inside the window, had already failed', async () => {
+        const world = createWorld()
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          workflowRun({
+            ...EARLIER_RUN,
+            conclusion: 'failure',
+            updatedAt: '2026-10-26T12:00:08Z'
+          })
+        ])
+
+        await expect(world.submit(retry(), {})).resolves.toBe('dispatched')
+        expect(world.github.dispatches).toHaveLength(1)
+      })
+
+      test('dispatches when the earlier run succeeded before the retry was created', async () => {
+        const world = createWorld()
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          workflowRun({ ...EARLIER_RUN, updatedAt: '2026-10-26T12:00:08Z' })
+        ])
+
+        await expect(world.submit(retry(), {})).resolves.toBe('dispatched')
+      })
+
+      test('a redelivery of the same command, its run still in progress, dispatches nothing', async () => {
+        const world = createWorld()
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          workflowRun({
+            ...EARLIER_RUN,
+            status: 'in_progress',
+            conclusion: null,
+            updatedAt: '2026-10-26T12:00:06Z'
+          })
+        ])
+
+        await expect(world.submit(retry(), {})).resolves.toBe('duplicate')
+        expect(world.github.dispatches).toEqual([])
+      })
+
+      test('a redelivery of the same command, its run completed after it was created, dispatches nothing', async () => {
+        const world = createWorld()
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          workflowRun({
+            ...EARLIER_RUN,
+            conclusion: 'failure',
+            updatedAt: '2026-10-26T12:00:12Z'
+          })
+        ])
+
+        await expect(world.submit(retry(), {})).resolves.toBe('duplicate')
+        expect(world.github.dispatches).toEqual([])
+      })
+
+      test('a run that completed at the very time the command was created belongs to the command', async () => {
+        const world = createWorld()
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          workflowRun({ ...EARLIER_RUN, updatedAt: '2026-10-26T12:00:09Z' })
+        ])
+
+        await expect(world.submit(retry(), {})).resolves.toBe('duplicate')
+      })
+
+      test('finds the run of the command among earlier ones', async () => {
+        const world = createWorld()
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          workflowRun({
+            ...EARLIER_RUN,
+            conclusion: 'failure',
+            updatedAt: '2026-10-26T12:00:08Z'
+          }),
+          workflowRun({
+            id: 78,
+            name: SUBMIT_RUN_NAME,
+            createdAt: '2026-10-26T12:00:11Z',
+            status: 'queued',
+            conclusion: null
+          })
+        ])
+
+        await expect(
+          world.submit(retry(), { logger: world.logger })
+        ).resolves.toBe('duplicate')
+        expect(world.logger.info).toHaveBeenCalledWith(
+          { runId: 78 },
+          expect.stringContaining('already exists')
+        )
+      })
+    })
+
     test('a run for another operation does not count', async () => {
       const world = createWorld()
 

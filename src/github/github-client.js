@@ -17,6 +17,7 @@
  * @property {string} headSha
  * @property {number} runAttempt
  * @property {string} createdAt - ISO 8601
+ * @property {string} updatedAt - ISO 8601; once the run is completed, when it ended
  * @property {string} htmlUrl
  *
  * @typedef {object} MainCommit

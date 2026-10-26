@@ -31,6 +31,10 @@ Messages are `aip.gitops.command/1` and `aip.gitops.event/1`, vendored from `ai-
 
 **Duplicates.** A redelivered or duplicated command dispatches nothing: `submit` and `apply` find the run they already started. A resubmission, retry, reconcile or resume has its own `commandId`, so SQS delivers it, and its newer `createdAt` keeps an earlier attempt's run from counting.
 
+**How `submit` tells its own run from an earlier attempt's.** The `submit.yml` run-name is `submit {action} {path} ({operation_id})` (plan PR-9: unchanged), so it names the operation and not the command. A run counts as the command's if its name has the operation, it was created from the command's `createdAt` less 5 s (the two clocks), and it is not a run that had completed before the command was created. That last rule is a heuristic, and it is sound because a retry is created only after the earlier run's failure, and commands are FIFO per team (`{environment}/{team}` message group), so a run that ended before a command existed cannot be that command's even when it was created inside the 5 s allowance. The completion time is the run's `updated_at`, compared exactly (no allowance); a run still going, or completed at or after the command's creation, still counts. Exact identity would need `command_id` in the callers' run-name, which is a plan change and was deliberately not made.
+
+**The run lookup fails closed.** It reads up to three pages of 100 runs; if the last is full, runs may lie beyond it, so it throws `RunLookupIncompleteError` and the command is redelivered rather than dispatched on an incomplete search. A report read for a run is used only if its events belong to the run's attempt (a rerun keeps its run ID and the report artifact cannot be overwritten).
+
 **Failures.** A handler error, an invalid message, or a command for a repository or path the worker is not for is never acknowledged: it is redelivered and, after three receives, reaches the dead-letter queue (see [Dead letters](#dead-letters-platform-team)).
 
 ### Reconcile

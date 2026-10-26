@@ -25,6 +25,8 @@ export function workflowRun(
 
   return {
     ...DEFAULT_RUN,
+    // Without a say, a run was last updated when it was created.
+    updatedAt: overrides.createdAt ?? DEFAULT_RUN.createdAt,
     htmlUrl: `https://github.com/${repository}/actions/runs/${id}`,
     ...overrides
   }
