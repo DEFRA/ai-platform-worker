@@ -1,10 +1,34 @@
 import convict from 'convict'
 import convictFormatWithValidator from 'convict-format-with-validator'
 
+import { gitopsConfigSchema } from '#/config-gitops.js'
+import { githubConfigSchema } from '#/config-github.js'
+
 convict.addFormats(convictFormatWithValidator)
+convict.addFormat({
+  name: 'repository',
+  validate(value) {
+    if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(value)) {
+      throw new Error('must be a repository as owner/name')
+    }
+  }
+})
 
 const isProduction = process.env.NODE_ENV === 'production'
 const isTest = process.env.NODE_ENV === 'test'
+
+// Whatever a log line names, these are removed: a team file document, the
+// person who asked, and every kind of token or key.
+const sensitiveLogPaths = [
+  'document',
+  '*.document',
+  'requestedBy',
+  '*.requestedBy',
+  'token',
+  '*.token',
+  'privateKey',
+  '*.privateKey'
+]
 
 export const config = convict({
   serviceVersion: {
@@ -66,13 +90,18 @@ export const config = convict({
       env: 'LOG_FORMAT'
     },
     redact: {
-      doc: 'Log paths to redact',
+      doc: 'Log paths to redact: never a document, a requester or a token (plan 7)',
       format: Array,
-      default: isProduction
-        ? ['req.headers.authorization', 'req.headers.cookie', 'res.headers']
-        : ['req', 'res', 'responseTime']
+      default: [
+        ...(isProduction
+          ? ['req.headers.authorization', 'req.headers.cookie', 'res.headers']
+          : ['req', 'res', 'responseTime']),
+        ...sensitiveLogPaths
+      ]
     }
   },
+  gitops: gitopsConfigSchema,
+  github: githubConfigSchema,
   httpProxy: {
     doc: 'HTTP Proxy URL',
     format: String,
