@@ -33,15 +33,6 @@
         "require_extra_approval_for_unattributed_changes": true,
         "allowed_merge_methods": ["merge", "squash", "rebase"]
       }
-    },
-    {
-      "type": "branch_name_pattern",
-      "parameters": {
-        "operator": "regex",
-        "pattern": "^(feature|fix|docs|refactor|test|chore)/.+",
-        "negate": false,
-        "name": "Branch name must follow <type>/<description>"
-      }
     }
   ],
   "bypass_actors": [

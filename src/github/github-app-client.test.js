@@ -1,3 +1,5 @@
+import { generateKeyPairSync } from 'node:crypto'
+
 import { createFakeGitHub } from '../../test/fakes/fake-github-http.js'
 import {
   GITHUB_API_VERSION,
@@ -123,8 +125,13 @@ describe('#github-app-client', () => {
       )
     })
 
-    test('creates the App auth with the credentials', () => {
-      const { createAuth } = setup()
+    test('creates the App auth with the credentials', async () => {
+      const { client, createAuth } = setup()
+
+      await client.request('GET /repos/{owner}/{repo}/commits', {
+        owner: 'DEFRA',
+        repo: 'ai-platform-tenants'
+      })
 
       expect(createAuth).toHaveBeenCalledWith(
         expect.objectContaining(CREDENTIALS)
@@ -242,6 +249,138 @@ describe('#github-app-client', () => {
       await dispatch()
 
       expect(Date.now() - started).toBeLessThan(900)
+    })
+  })
+
+  describe('token acquisition and the handler signal (the real auth adapter over fake HTTP)', () => {
+    const TOKEN_ROUTE =
+      'POST /app/installations/{installation_id}/access_tokens'
+    const COMMITS = 'GET /repos/{owner}/{repo}/commits'
+    const { privateKey } = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' }
+    })
+
+    // The token exchange either answers or stalls until its own signal aborts.
+    function realAuthSetup({ stallExchange = false } = {}) {
+      const exchanges = []
+      const github = createFakeGitHub({
+        [TOKEN_ROUTE]: () => ({
+          status: 201,
+          body: {
+            token: 'minted-token',
+            expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+            permissions: WORKER_PERMISSIONS,
+            repository_selection: 'selected',
+            repositories: [{ id: 1, name: 'ai-platform-tenants' }]
+          }
+        }),
+        [COMMITS]: () => ({ body: [] })
+      })
+      const fetch = (input, init = {}) => {
+        if (!String(input.url ?? input).includes('/access_tokens')) {
+          return github.fetch(input, init)
+        }
+
+        exchanges.push(init.signal)
+
+        if (!stallExchange) {
+          return github.fetch(input, init)
+        }
+
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(init.signal.reason)
+          )
+        })
+      }
+      const client = createGithubAppClient(
+        { repositoryNames: ['ai-platform-tenants'] },
+        { credentials: { ...CREDENTIALS, privateKey }, fetch }
+      )
+      const read = (signal) =>
+        client.request(COMMITS, {
+          owner: 'DEFRA',
+          repo: 'ai-platform-tenants',
+          request: { signal }
+        })
+
+      return { read, exchanges, github }
+    }
+
+    test('stops a stalled token exchange when the handler signal aborts', async () => {
+      const { read, exchanges, github } = realAuthSetup({ stallExchange: true })
+      const controller = new AbortController()
+      const reason = new Error('handler timeout')
+
+      const pending = read(controller.signal)
+      await vi.waitFor(() => expect(exchanges).toHaveLength(1))
+      controller.abort(reason)
+
+      await expect(pending).rejects.toBe(reason)
+      expect(github.requests).toEqual([])
+    })
+
+    test('rejects an already-aborted request before it mints a token', async () => {
+      const { read, exchanges } = realAuthSetup()
+      const reason = new Error('already over')
+
+      await expect(read(AbortSignal.abort(reason))).rejects.toBe(reason)
+      expect(exchanges).toEqual([])
+    })
+
+    test('binds each exchange to its own request signal, so one handler timeout never aborts another', async () => {
+      const { read, exchanges } = realAuthSetup({ stallExchange: true })
+      const first = new AbortController()
+      const pending = read(first.signal)
+      await vi.waitFor(() => expect(exchanges).toHaveLength(1))
+      first.abort(new Error('first handler timed out'))
+      await expect(pending).rejects.toThrow('first handler timed out')
+
+      const second = new AbortController()
+      const secondPending = read(second.signal)
+      await vi.waitFor(() => expect(exchanges).toHaveLength(2))
+
+      expect(exchanges[1].aborted).toBe(false)
+      expect(exchanges[1]).not.toBe(exchanges[0])
+      second.abort(new Error('second handler timed out'))
+      await expect(secondPending).rejects.toThrow('second handler timed out')
+    })
+
+    test('still caches the token across requests', async () => {
+      const { read, exchanges, github } = realAuthSetup()
+
+      await read(new AbortController().signal)
+      await read(new AbortController().signal)
+
+      expect(exchanges).toHaveLength(1)
+      const reads = github.requests.filter(({ path }) =>
+        path.endsWith('/commits')
+      )
+
+      expect(reads.map(({ headers }) => headers.authorization)).toEqual([
+        'token minted-token',
+        'token minted-token'
+      ])
+    })
+    test('mints a fresh token once the cached one is about to expire', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+
+      try {
+        const { read, exchanges } = realAuthSetup()
+
+        await read(new AbortController().signal)
+        vi.setSystemTime(Date.now() + 58 * 60 * 1000)
+        await read(new AbortController().signal)
+        expect(exchanges).toHaveLength(1)
+
+        vi.setSystemTime(Date.now() + 2 * 60 * 1000)
+        await read(new AbortController().signal)
+        expect(exchanges).toHaveLength(2)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 

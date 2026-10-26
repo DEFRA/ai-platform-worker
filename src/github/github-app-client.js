@@ -83,6 +83,31 @@ export function credentialsFromConfig() {
   }
 }
 
+// An installation token lasts an hour; like the auth library's own cache, keep
+// it a minute short of that. The auth is built per request (so each token
+// exchange can carry that request's signal), so the cache outlives it.
+const TOKEN_CACHE_TTL_MS = 59 * 60 * 1000
+
+function createTokenCache(now = Date.now) {
+  const entries = new Map()
+
+  return {
+    get(key) {
+      const entry = entries.get(key)
+
+      if (entry && entry.expiresAt <= now()) {
+        entries.delete(key)
+        return undefined
+      }
+
+      return entry?.value
+    },
+    set(key, value) {
+      entries.set(key, { value, expiresAt: now() + TOKEN_CACHE_TTL_MS })
+    }
+  }
+}
+
 // Every caller owns its resilience (the adapter retries reads, the handler
 // owns the dispatch), so Octokit's bundled retry and throttling plugins, which
 // would sleep inside a request for minutes, are both off.
@@ -176,22 +201,41 @@ export function createGithubAppClient(
 
   // The App's own requests (the JWT-signed token exchange) go through a
   // separate client so they never re-enter the hook below.
-  const appAuth = createAuth({
-    appId,
-    privateKey,
-    installationId,
-    request: createBaseOctokit({ fetch }).request
-  })
+  const appRequest = createBaseOctokit({ fetch }).request
+  const tokenCache = createTokenCache()
   const octokit = createBaseOctokit({ fetch })
 
   octokit.hook.before('request', async (options) => {
-    const { token } = await appAuth({
-      type: 'installation',
-      repositoryNames,
-      permissions
-    })
+    const signal = options.request?.signal
 
-    options.headers.authorization = `token ${token}`
+    // A request the handler has already abandoned must not mint a token.
+    signal?.throwIfAborted()
+
+    try {
+      // The exchange is bound to this request's own signal (never shared with
+      // another request's), so a stalled exchange stops with the handler. The
+      // tokens are cached across requests by the cache all the auths share.
+      const appAuth = createAuth({
+        appId,
+        privateKey,
+        installationId,
+        cache: tokenCache,
+        request: signal
+          ? appRequest.defaults({ request: { signal } })
+          : appRequest
+      })
+      const { token } = await appAuth({
+        type: 'installation',
+        repositoryNames,
+        permissions
+      })
+
+      options.headers.authorization = `token ${token}`
+    } catch (error) {
+      // Octokit wraps an aborted exchange as a 500; the handler's abort reason
+      // is what the caller needs (and what the retry helper never retries).
+      throw signal?.aborted ? signal.reason : error
+    }
   })
 
   if (onRateLimit) {
