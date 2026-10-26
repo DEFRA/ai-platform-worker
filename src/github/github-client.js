@@ -28,9 +28,12 @@
  * @property {(params: {repository: string, workflowId: string, inputs: Record<string, string>, signal?: AbortSignal}) => Promise<{runId: number|null, runUrl: string|null}>} dispatchWorkflow
  *   dispatches the workflow on `main`; asks GitHub for the run it created
  * @property {(params: {repository: string, workflowId: string, createdFrom: string, signal?: AbortSignal}) => Promise<WorkflowRun[]>} listWorkflowRuns
- *   the workflow's runs on `main` created at or after `createdFrom`, newest first
- * @property {(params: {repository: string, runId: number, environment: string, signal?: AbortSignal}) => Promise<object|null>} getRunReport
+ *   the workflow's runs on `main` created at or after `createdFrom`, newest first; throws
+ *   `RunLookupIncompleteError` when they do not all fit the page budget, as an incomplete
+ *   list must not be read as the absence of a run
+ * @property {(params: {repository: string, runId: number, runAttempt: number, environment: string, signal?: AbortSignal}) => Promise<object|null>} getRunReport
  *   the parsed `run-report-{environment}.json` artifact, or null when the run has no unexpired one
+ *   that belongs to the attempt (a rerun keeps its run ID, so an earlier attempt's report is on the run too)
  * @property {(params: {repository: string, path: string, since: string, signal?: AbortSignal}) => Promise<MainCommit[]>} listCommits
  *   the commits on `main` that touched `path` since the time, newest first
  * @property {(params: {repository: string, runId: number, signal?: AbortSignal}) => Promise<string[]>} listRunJobNames
@@ -47,5 +50,19 @@ export const APPLY_WORKFLOW = 'apply.yml'
 
 /** The only branch the worker dispatches on and reads. */
 export const MAIN = 'main'
+
+/**
+ * The run lookup reached its page budget with a full page, so runs may lie
+ * beyond it. A caller that dispatches when it finds no run must not take the
+ * search for complete: the handler fails, and SQS redelivers the command.
+ */
+export class RunLookupIncompleteError extends Error {
+  constructor({ repository, workflowId, pages }) {
+    super(
+      `The runs of ${workflowId} in ${repository} fill ${pages} pages, so the search for a run is incomplete`
+    )
+    this.name = 'RunLookupIncompleteError'
+  }
+}
 
 export {}

@@ -112,6 +112,7 @@ export function describeGitHubClientContract(name, createHarness) {
           harness.client.getRunReport({
             repository: REPO,
             runId: 42,
+            runAttempt: 1,
             environment: 'infradev'
           })
         ).resolves.toEqual(report)
@@ -122,6 +123,7 @@ export function describeGitHubClientContract(name, createHarness) {
           harness.client.getRunReport({
             repository: REPO,
             runId: 43,
+            runAttempt: 1,
             environment: 'infradev'
           })
         ).resolves.toBeNull()
@@ -134,9 +136,91 @@ export function describeGitHubClientContract(name, createHarness) {
           harness.client.getRunReport({
             repository: REPO,
             runId: 44,
+            runAttempt: 1,
             environment: 'infradev'
           })
         ).resolves.toBeNull()
+      })
+
+      // A rerun keeps its run ID and the workflows' artifact name has no
+      // overwrite, so the report an earlier attempt uploaded is still on the
+      // run. Its events say which attempt wrote it.
+      test('returns the report whose events belong to the attempt asked for', async () => {
+        const report = {
+          events: [{ status: 'checks-failed', runAttempt: 2 }]
+        }
+
+        harness.seedReport(REPO, 45, 'infradev', report)
+
+        await expect(
+          harness.client.getRunReport({
+            repository: REPO,
+            runId: 45,
+            runAttempt: 2,
+            environment: 'infradev'
+          })
+        ).resolves.toEqual(report)
+      })
+
+      test('returns null for a report an earlier attempt of the run uploaded', async () => {
+        harness.seedReport(REPO, 46, 'infradev', {
+          events: [{ status: 'checks-failed', runAttempt: 1 }]
+        })
+
+        await expect(
+          harness.client.getRunReport({
+            repository: REPO,
+            runId: 46,
+            runAttempt: 2,
+            environment: 'infradev'
+          })
+        ).resolves.toBeNull()
+      })
+
+      test('returns null for a report that is not wholly of the attempt asked for', async () => {
+        harness.seedReport(REPO, 47, 'infradev', {
+          events: [
+            { status: 'requested', runAttempt: 2 },
+            { status: 'checks-failed', runAttempt: 1 }
+          ]
+        })
+
+        await expect(
+          harness.client.getRunReport({
+            repository: REPO,
+            runId: 47,
+            runAttempt: 2,
+            environment: 'infradev'
+          })
+        ).resolves.toBeNull()
+      })
+
+      test('returns null for a report that names no attempt when the run is a rerun, as it cannot be shown to belong to it', async () => {
+        harness.seedReport(REPO, 48, 'infradev', { outcome: 'failure' })
+
+        await expect(
+          harness.client.getRunReport({
+            repository: REPO,
+            runId: 48,
+            runAttempt: 2,
+            environment: 'infradev'
+          })
+        ).resolves.toBeNull()
+      })
+
+      test('returns a report that names no attempt for the first attempt, the only one that could have uploaded it', async () => {
+        const report = { outcome: 'failure' }
+
+        harness.seedReport(REPO, 49, 'infradev', report)
+
+        await expect(
+          harness.client.getRunReport({
+            repository: REPO,
+            runId: 49,
+            runAttempt: 1,
+            environment: 'infradev'
+          })
+        ).resolves.toEqual(report)
       })
     })
 

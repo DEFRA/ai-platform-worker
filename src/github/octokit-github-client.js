@@ -1,5 +1,6 @@
 import { retry } from '#/common/helpers/retry.js'
-import { MAIN } from '#/github/github-client.js'
+import { MAIN, RunLookupIncompleteError } from '#/github/github-client.js'
+import { reportOfAttempt } from '#/github/run-report.js'
 
 const PER_PAGE = 100
 // A day of runs of one workflow is well under this; the cap only bounds the
@@ -125,19 +126,23 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
         runs.push(...batch)
 
         if (batch.length < PER_PAGE) {
-          break
+          return runs
+            .map(toRun)
+            .toSorted(
+              (a, b) =>
+                Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id
+            )
         }
       }
 
-      return runs
-        .map(toRun)
-        .toSorted(
-          (a, b) =>
-            Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id
-        )
+      throw new RunLookupIncompleteError({
+        repository: params.repository,
+        workflowId: params.workflowId,
+        pages: MAX_PAGES
+      })
     },
 
-    async getRunReport({ repository, runId, environment, signal }) {
+    async getRunReport({ repository, runId, runAttempt, environment, signal }) {
       const name = `run-report-${environment}.json`
       const { data } = await read(
         repository,
@@ -169,7 +174,7 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
         { signal, ...retryOptions }
       )
 
-      return parseReport(file)
+      return reportOfAttempt(parseReport(file), runAttempt)
     },
 
     async listCommits({ repository, path, since, signal }) {

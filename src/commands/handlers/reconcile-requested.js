@@ -39,6 +39,7 @@ export function createRequestedReconciler({
     return github.getRunReport({
       repository: command.repository,
       runId: run.id,
+      runAttempt: run.runAttempt,
       environment: command.environment,
       signal
     })

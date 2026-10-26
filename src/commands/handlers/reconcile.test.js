@@ -206,6 +206,68 @@ describe('#reconcile handler', () => {
       expect(world.events.events[0].failureReason.code).toBe('paused')
     })
 
+    test('a rerun does not republish the failure an earlier attempt recorded: the report is of attempt 1, the run is attempt 2', async () => {
+      const world = createWorld()
+
+      world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+        submitRun({ conclusion: 'failure', runAttempt: 2 })
+      ])
+      world.github.seedReport(TENANTS_REPO, 25000000001, 'infradev', {
+        events: [
+          {
+            operationId: OPERATION_ID,
+            status: 'checks-failed',
+            runAttempt: 1,
+            failureReason: {
+              code: 'stale-revision',
+              message: 'The file moved.',
+              retryable: true
+            }
+          }
+        ]
+      })
+
+      await world.reconcile(requested(), context(world))
+
+      expect(world.events.events).toHaveLength(1)
+      expect(world.events.events[0]).toMatchObject({
+        status: 'checks-failed',
+        runAttempt: 2,
+        eventId: `${OPERATION_ID}:checks-failed:25000000001:2`,
+        failureReason: { code: 'submit-failed', retryable: false }
+      })
+      expect(world.github.calls).toContainEqual(
+        expect.objectContaining({ method: 'getRunReport', runAttempt: 2 })
+      )
+    })
+
+    test('a rerun that succeeded does not publish the failure an earlier attempt recorded', async () => {
+      const world = createWorld()
+
+      world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+        submitRun({ runAttempt: 2 })
+      ])
+      world.github.seedReport(TENANTS_REPO, 25000000001, 'infradev', {
+        events: [
+          {
+            operationId: OPERATION_ID,
+            status: 'checks-failed',
+            runAttempt: 1,
+            failureReason: {
+              code: 'paused',
+              message: 'The environment is paused.',
+              retryable: true
+            }
+          }
+        ]
+      })
+
+      await expect(world.reconcile(requested(), context(world))).resolves.toBe(
+        'dispatched'
+      )
+      expect(world.events.events).toEqual([])
+    })
+
     test('a failed run with no report: publishes a plain failure naming the conclusion', async () => {
       const world = createWorld()
 
@@ -412,6 +474,25 @@ describe('#reconcile handler', () => {
         code: 'paused',
         retryable: true
       })
+    })
+
+    test('a rerun of an apply does not republish the failure an earlier attempt reported', async () => {
+      const world = createWorld()
+
+      withCommit(world)
+      world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+        applyRun({ conclusion: 'failure', runAttempt: 2 })
+      ])
+      world.github.seedReport(TENANTS_REPO, 25000000010, 'infradev', {
+        outcome: 'failure',
+        operations: OPERATIONS,
+        events: [{ status: 'deploy-failed', runAttempt: 1 }]
+      })
+
+      await expect(world.reconcile(committed(), context(world))).resolves.toBe(
+        'dispatched'
+      )
+      expect(world.events.events).toEqual([])
     })
 
     test.each([

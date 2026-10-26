@@ -105,6 +105,7 @@ export function createAppliedReconciler({
       const report = await github.getRunReport({
         repository: command.repository,
         runId: run.id,
+        runAttempt: run.runAttempt,
         environment: command.environment,
         signal
       })

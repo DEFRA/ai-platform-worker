@@ -1,6 +1,7 @@
 import { Octokit } from 'octokit'
 
 import { createFakeGitHub } from '../../test/fakes/fake-github-http.js'
+import { RunLookupIncompleteError } from '#/github/github-client.js'
 import { createOctokitGitHubClient } from '#/github/octokit-github-client.js'
 import { describeGitHubClientContract } from '#/github/github-client-contract.js'
 
@@ -290,31 +291,67 @@ describe('#octokit-github-client', () => {
     expect(calls).toBe(1)
   })
 
-  test('reads up to three pages of runs and no more', async () => {
-    const pages = []
-    const full = Array.from({ length: 100 }, (_, index) => ({
-      id: index + 1,
-      name: 'submit',
-      status: 'completed',
-      conclusion: 'success',
-      event: 'workflow_dispatch',
-      head_sha: 'a'.repeat(40),
-      created_at: '2026-10-26T12:00:00Z',
-      html_url: 'https://github.com/o/r/actions/runs/1'
-    }))
-    const { client } = clientOver({
-      [RUNS_ROUTE]: ({ query }) => {
-        pages.push(query.get('page'))
+  describe('the run lookup is bounded and fails closed', () => {
+    const PAGE = 100
+    const MAX_PAGES = 3
 
-        return { body: { workflow_runs: full } }
-      }
+    function restRuns(count) {
+      return Array.from({ length: count }, (_, index) => ({
+        id: index + 1,
+        name: 'submit',
+        status: 'completed',
+        conclusion: 'success',
+        event: 'workflow_dispatch',
+        head_sha: 'a'.repeat(40),
+        created_at: '2026-10-26T12:00:00Z',
+        html_url: 'https://github.com/o/r/actions/runs/1'
+      }))
+    }
+
+    function clientWithPages(lengths) {
+      const pages = []
+      const { client } = clientOver({
+        [RUNS_ROUTE]: ({ query }) => {
+          pages.push(query.get('page'))
+
+          return {
+            body: {
+              workflow_runs: restRuns(lengths[Number(query.get('page')) - 1])
+            }
+          }
+        }
+      })
+
+      return { client, pages }
+    }
+
+    test('reads the pages until one is short, and returns every run', async () => {
+      const { client, pages } = clientWithPages([PAGE, PAGE, 99])
+
+      const runs = await client.listWorkflowRuns(PARAMS)
+
+      expect(pages).toEqual(['1', '2', '3'])
+      expect(runs).toHaveLength(299)
+      expect(runs[0].runAttempt).toBe(1)
     })
 
-    const runs = await client.listWorkflowRuns(PARAMS)
+    test('stops at the page budget and refuses to answer, rather than reading an incomplete search as absence', async () => {
+      const { client, pages } = clientWithPages([PAGE, PAGE, PAGE, PAGE])
 
-    expect(pages).toEqual(['1', '2', '3'])
-    expect(runs).toHaveLength(300)
-    expect(runs[0].runAttempt).toBe(1)
+      await expect(client.listWorkflowRuns(PARAMS)).rejects.toBeInstanceOf(
+        RunLookupIncompleteError
+      )
+      expect(pages).toEqual(['1', '2', '3'])
+      expect(pages).toHaveLength(MAX_PAGES)
+    })
+
+    test('names the repository and workflow it could not search to the end', async () => {
+      const { client } = clientWithPages([PAGE, PAGE, PAGE])
+
+      await expect(client.listWorkflowRuns(PARAMS)).rejects.toThrow(
+        /submit\.yml.*DEFRA\/ai-platform-tenants/
+      )
+    })
   })
 
   test('asks only for runs on main from the time', async () => {
@@ -352,6 +389,7 @@ describe('#octokit-github-client', () => {
       client.getRunReport({
         repository: 'DEFRA/ai-platform-tenants',
         runId: 9,
+        runAttempt: 1,
         environment: 'infradev'
       })
     ).resolves.toEqual(report)
@@ -380,6 +418,7 @@ describe('#octokit-github-client', () => {
       client.getRunReport({
         repository: 'DEFRA/ai-platform-tenants',
         runId: 9,
+        runAttempt: 1,
         environment: 'infradev'
       })
     ).resolves.toEqual({ outcome: 'failure' })
@@ -392,6 +431,7 @@ describe('#octokit-github-client', () => {
       client.getRunReport({
         repository: 'DEFRA/ai-platform-tenants',
         runId: 9,
+        runAttempt: 1,
         environment: 'infradev'
       })
     ).resolves.toBeNull()
@@ -409,6 +449,7 @@ describe('#octokit-github-client', () => {
       client.getRunReport({
         repository: 'DEFRA/ai-platform-tenants',
         runId: 9,
+        runAttempt: 1,
         environment: 'infradev'
       })
     ).rejects.toMatchObject({ status: 403 })

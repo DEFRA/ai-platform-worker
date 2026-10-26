@@ -1,3 +1,5 @@
+import { reportOfAttempt } from '#/github/run-report.js'
+
 const DEFAULT_RUN = {
   id: 1001,
   name: 'submit write environments/infradev/alpha.json (op-7f3c9a1e)',
@@ -123,9 +125,12 @@ export function createInMemoryGitHubClient({ firstRunId = 9001 } = {}) {
     },
     async getRunReport(params) {
       record('getRunReport', params)
-      const { repository, runId, environment } = params
+      const { repository, runId, runAttempt, environment } = params
 
-      return reports.get(`${repository}:${runId}:${environment}`) ?? null
+      return reportOfAttempt(
+        reports.get(`${repository}:${runId}:${environment}`) ?? null,
+        runAttempt
+      )
     },
     async listCommits(params) {
       record('listCommits', params)

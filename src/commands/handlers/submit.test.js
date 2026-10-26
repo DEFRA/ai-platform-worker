@@ -1,3 +1,5 @@
+import { Octokit } from 'octokit'
+
 import {
   CDP_REQUEST_ID,
   OPERATION_ID,
@@ -5,8 +7,15 @@ import {
   TRACEPARENT,
   exampleCommand
 } from '../../../test/fixtures/gitops-messages.js'
+import { createFakeGitHub } from '../../../test/fakes/fake-github-http.js'
+import { createFakeMetrics } from '../../../test/fakes/fake-metrics.js'
 import { workflowRun } from '../../../test/fakes/in-memory-github-client.js'
 import { createWorld } from '../../../test/fakes/world.js'
+import { createSubmitHandler } from '#/commands/handlers/submit.js'
+import { RunLookupIncompleteError } from '#/github/github-client.js'
+import { createOctokitGitHubClient } from '#/github/octokit-github-client.js'
+import { createWorkflowDispatcher } from '#/github/workflow-dispatcher.js'
+import { createRunReader } from '#/reconciler/run-reader.js'
 
 const COMMAND = exampleCommand({ createdAt: '2026-10-26T12:00:00Z' })
 const SUBMIT_RUN_NAME =
@@ -89,6 +98,76 @@ describe('#submit handler', () => {
       world.github.failNext('dispatchWorkflow', error)
 
       await expect(world.submit(COMMAND, {})).rejects.toBe(error)
+    })
+
+    // GitHub lists a workflow's runs a page of 100 at a time, newest first,
+    // and the worker reads three pages. A command whose run lies behind 300
+    // newer runs must not be taken for a new one.
+    test('a redelivered command whose run is on page four dispatches nothing: an incomplete search is not absence', async () => {
+      const dispatches = []
+      const pages = []
+      const run = (id, name) => ({
+        id,
+        name,
+        display_title: name,
+        status: 'completed',
+        conclusion: 'success',
+        event: 'workflow_dispatch',
+        head_sha: 'a'.repeat(40),
+        run_attempt: 1,
+        created_at: '2026-10-26T12:00:05Z',
+        html_url: `https://github.com/${TENANTS_REPO}/actions/runs/${id}`
+      })
+      const others = Array.from({ length: 300 }, (_, index) =>
+        run(
+          index + 1,
+          `submit write environments/infradev/other-${index}.json (op-other-${index})`
+        )
+      )
+      const existing = run(9999, SUBMIT_RUN_NAME)
+      const history = [...others, existing]
+      const { fetch } = createFakeGitHub({
+        'GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs': ({
+          query
+        }) => {
+          const page = Number(query.get('page'))
+
+          pages.push(page)
+
+          return {
+            body: {
+              workflow_runs: history.slice((page - 1) * 100, page * 100)
+            }
+          }
+        },
+        'POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches':
+          ({ body }) => {
+            dispatches.push(body)
+
+            return { body: { workflow_run_id: 1, html_url: 'https://x/1' } }
+          }
+      })
+      const octokit = new Octokit({
+        request: { fetch, retries: 0 },
+        throttle: { enabled: false }
+      })
+      const github = createOctokitGitHubClient({
+        clientFor: () => octokit,
+        retryOptions: { sleep: async () => {}, random: () => 0 }
+      })
+      const runReader = createRunReader({ github })
+      const dispatcher = createWorkflowDispatcher({
+        github,
+        runReader,
+        metrics: createFakeMetrics()
+      })
+      const submit = createSubmitHandler({ runReader, dispatcher })
+
+      await expect(submit(COMMAND, {})).rejects.toBeInstanceOf(
+        RunLookupIncompleteError
+      )
+      expect(pages).toEqual([1, 2, 3])
+      expect(dispatches).toEqual([])
     })
   })
 
