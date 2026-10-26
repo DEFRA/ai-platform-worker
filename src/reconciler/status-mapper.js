@@ -178,7 +178,7 @@ export function deployFailedEvent({ command, run, commit, report, now }) {
 
 // The reason a submit run recorded with its own `checks-failed` event, if the
 // run report kept one for this operation.
-function recordedFailure(report, operationId) {
+export function recordedFailureOf(report, operationId) {
   return (report?.events ?? []).find(
     (event) =>
       event.operationId === operationId && event.status === 'checks-failed'
@@ -193,7 +193,7 @@ function recordedFailure(report, operationId) {
  * @param {{command: object, run: object, report: object|null, now: Date}} facts
  */
 export function checksFailedEvent({ command, run, report, now }) {
-  const recorded = recordedFailure(report, command.operationId)
+  const recorded = recordedFailureOf(report, command.operationId)
 
   return {
     ...baseEvent(command, 'checks-failed', run, now),
