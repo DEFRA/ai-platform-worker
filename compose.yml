@@ -32,6 +32,14 @@ services:
     environment:
       PORT: 3001
       NODE_ENV: development
+      AWS_SQS_ENDPOINT: http://floci:4566
+      GITOPS_COMMANDS_QUEUE_URL: http://floci:4566/000000000000/aip-gitops-commands.fifo
+      GITOPS_EVENTS_QUEUE_URL: http://floci:4566/000000000000/aip-gitops-events.fifo
+      # The GitHub App credentials are not set here: pass GITHUB_APP_ID,
+      # GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY from your shell.
+      GITHUB_APP_ID:
+      GITHUB_APP_INSTALLATION_ID:
+      GITHUB_APP_PRIVATE_KEY:
     networks:
       - cdp-tenant
     volumes:
