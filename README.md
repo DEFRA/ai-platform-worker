@@ -50,6 +50,10 @@ The backend's sweeper sends `reconcile` for an operation past its deadline (`req
 
 Choices the plan does not spell out, recorded here: the newest run decides; a reconcile reads at most five apply reports; a failed run with no recorded reason is reported as `submit-failed`, never retryable; a reconcile from `committed` or `deploying` carries no `action`, so its events say `apply`; `resources[]` in a reconciled `deployed` event is flattened from the report's `outputs.teams.value[team]` (project, deployments, API, Entra application and service principal).
 
+### Shared fixture
+
+The worker and the workflows (`ai-platform-workflows` `src/resources.js`) each flatten a run report's `outputs.teams.value[team]` into the event's `resources[]`, and the first `deployed` event to arrive decides what the backend stores. `test/fixtures/team-resources-cases.json` holds the cases both copies must produce the same `resources[]` for; `src/reconciler/resources-mapper.shared.test.js` (`R3-F3`) asserts them here. The workflows repository must carry an identical copy of the file (sha256 `EFBFAAE66DB9B55B0539F70CA57534A0A6E2446CF66DF12BAEA015EC233D6600`) and run the same cases against its mapper; change the file in both together, and when infra's `modules/team` `resources` output changes.
+
 ## Configuration
 
 Read through `convict` (`src/config.js`, `src/config-gitops.js`, `src/config-github.js`). Secrets and CDP configuration live in the CDP Portal and `cdp-app-config`; a change applies on redeploy.
@@ -77,6 +81,8 @@ For testing only; CDP environments run the deployed service.
 ```bash
 docker compose up floci -d          # both FIFO queues and their dead-letter queues
 ```
+
+Floci is pinned to `floci/floci:2.3.0-compat` by digest in `compose.yml` and in the `floci` CI job, so the local run and CI use the same emulator; change both together. The `-compat` image has the `aws` CLI the queue script calls. The new image has not been started here (no Docker daemon): the script and the init directory path are unverified against it.
 
 Then, with the App credentials in your shell (never in a file in this repository):
 

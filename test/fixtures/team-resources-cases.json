@@ -1,0 +1,81 @@
+[
+  {
+    "name": "flattens the team outputs into typed resources",
+    "team": "alpha",
+    "report": {
+      "outputs": {
+        "teams": {
+          "value": {
+            "alpha": {
+              "project": { "id": "/p", "name": "aip-alpha" },
+              "deployments": { "nano": { "id": "/d", "name": "alpha-nano" } },
+              "api": { "id": "/a", "name": "alpha" },
+              "registration": {
+                "object_id": "obj-1",
+                "service_principal_object_id": "obj-2"
+              }
+            }
+          }
+        }
+      }
+    },
+    "expected": [
+      {
+        "type": "azapi_resource.foundry_project",
+        "name": "aip-alpha",
+        "id": "/p"
+      },
+      {
+        "type": "azurerm_cognitive_deployment",
+        "name": "alpha-nano",
+        "id": "/d"
+      },
+      { "type": "azurerm_api_management_api", "name": "alpha", "id": "/a" },
+      { "type": "azuread_application", "name": "alpha", "id": "obj-1" },
+      { "type": "azuread_service_principal", "name": "alpha", "id": "obj-2" }
+    ]
+  },
+  {
+    "name": "skips what Terraform did not create: no registration, no api, a deployment with no ID",
+    "team": "alpha",
+    "report": {
+      "outputs": {
+        "teams": {
+          "value": {
+            "alpha": {
+              "project": { "id": "/p", "name": "aip-alpha" },
+              "deployments": { "broken": { "name": "alpha-broken" } },
+              "api": null,
+              "registration": null
+            }
+          }
+        }
+      }
+    },
+    "expected": [
+      {
+        "type": "azapi_resource.foundry_project",
+        "name": "aip-alpha",
+        "id": "/p"
+      }
+    ]
+  },
+  {
+    "name": "has none for a team whose outputs are empty",
+    "team": "alpha",
+    "report": { "outputs": { "teams": { "value": { "alpha": {} } } } },
+    "expected": []
+  },
+  {
+    "name": "has none for a team the outputs do not name (a removal)",
+    "team": "alpha",
+    "report": { "outputs": { "teams": { "value": {} } } },
+    "expected": []
+  },
+  {
+    "name": "has none without a report",
+    "team": "alpha",
+    "report": null,
+    "expected": []
+  }
+]
