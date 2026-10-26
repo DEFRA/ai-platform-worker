@@ -25,12 +25,25 @@ updates:
         patterns:
           - 'husky'
           - 'vitest'
-          - 'nodemon'
-          - 'npm-run-all'
+          - '@vitest/*'
+
+      aws:
+        patterns:
+          - '@aws-sdk/*'
+          - 'sqs-consumer'
+
+      github:
+        patterns:
+          - 'octokit'
+          - '@octokit/*'
 
     ignore:
       - dependency-name: 'eslint-*'
       - dependency-name: 'eslint'
+
+    # A new release waits seven days before a pull request is opened for it
+    cooldown:
+      default-days: 7
 
     # Schedule run every Monday, local time
     schedule:
@@ -47,6 +60,10 @@ updates:
   # Update GitHub Actions
   - package-ecosystem: github-actions
     directory: /
+
+    # A new release waits seven days before a pull request is opened for it
+    cooldown:
+      default-days: 7
 
     # Schedule run every Monday, local time
     schedule:
