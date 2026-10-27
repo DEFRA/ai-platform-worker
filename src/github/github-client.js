@@ -81,5 +81,3 @@ export class CommitLookupIncompleteError extends Error {
     this.name = 'CommitLookupIncompleteError'
   }
 }
-
-export {}

@@ -1,3 +1,6 @@
+const HTTP_OK = 200
+const HTTP_SERVICE_UNAVAILABLE = 503
+
 export const health = {
   method: 'GET',
   path: '/health',
@@ -8,6 +11,6 @@ export const health = {
 
     return h
       .response({ message: running ? 'success' : 'consumer stopped' })
-      .code(running ? 200 : 503)
+      .code(running ? HTTP_OK : HTTP_SERVICE_UNAVAILABLE)
   }
 }

@@ -86,7 +86,9 @@ export function credentialsFromConfig() {
 // An installation token lasts an hour; like the auth library's own cache, keep
 // it a minute short of that. The auth is built per request (so each token
 // exchange can carry that request's signal), so the cache outlives it.
-const TOKEN_CACHE_TTL_MS = 59 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+const TOKEN_EXPIRY_MARGIN_MS = 60 * 1000
+const TOKEN_CACHE_TTL_MS = HOUR_MS - TOKEN_EXPIRY_MARGIN_MS
 
 function createTokenCache(now = Date.now) {
   const entries = new Map()
