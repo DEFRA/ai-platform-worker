@@ -18,7 +18,8 @@ import {
   createMessageHandler
 } from '#/commands/commands-consumer.js'
 
-const QUEUE_URL = 'http://floci:4566/000000000000/aip-gitops-commands.fifo'
+const QUEUE_URL =
+  'http://floci:4566/000000000000/aip_gitops_commands_worker.fifo'
 const ALLOWED = new Set([TENANTS_REPO, DEPLOYMENTS_REPO])
 const SETTINGS = {
   waitTimeSeconds: 20,
