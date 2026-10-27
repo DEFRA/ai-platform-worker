@@ -6,6 +6,7 @@ import { createRequestedReconciler } from '#/commands/handlers/reconcile-request
 // older one; operation IDs are unique, so the window only bounds the lookup.
 export const DEFAULT_RECONCILE_LOOKBACK_MS = 24 * 60 * 60 * 1000
 
+const NOTHING_TO_RECONCILE = 'nothing-to-reconcile'
 const APPLIED_STATES = new Set(['committed', 'deploying'])
 
 /**
@@ -43,14 +44,20 @@ export function createReconcileHandler({
   const requested = createRequestedReconciler(deps)
   const applied = createAppliedReconciler(deps)
 
-  return async function handleReconcile(command, context) {
-    let outcome = 'nothing-to-reconcile'
-
+  function reconcileState(command, context) {
     if (command.state === 'requested') {
-      outcome = await requested(command, context)
-    } else if (APPLIED_STATES.has(command.state)) {
-      outcome = await applied(command, context)
+      return requested(command, context)
     }
+
+    if (APPLIED_STATES.has(command.state)) {
+      return applied(command, context)
+    }
+
+    return NOTHING_TO_RECONCILE
+  }
+
+  return async function handleReconcile(command, context) {
+    const outcome = await reconcileState(command, context)
 
     await metrics.counter('reconciles', 1, { state: command.state, outcome })
 
