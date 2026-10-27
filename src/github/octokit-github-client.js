@@ -58,18 +58,36 @@ function toRun(run) {
   }
 }
 
-/**
- * The `GitHubClient` port over Octokit (plan 6.1). Every read goes through
- * `retry` (a server error or dropped connection is tried again with jittered
- * backoff); the dispatch is never retried inside a handler, because a lost
- * response must not become a second run: SQS redelivers the command and the
- * handler looks for the run first. Each call carries the handler's signal.
- * @param {object} deps
- * @param {(repository: string) => import('octokit').Octokit} deps.clientFor - a client down-scoped to the one repository
- * @param {object} [deps.retryOptions] - passed to `retry`
- * @returns {import('#/github/github-client.js').GitHubClient}
- */
-export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
+function toCommit(commit) {
+  return {
+    sha: commit.sha,
+    message: commit.commit.message,
+    committedAt: commit.commit.committer.date
+  }
+}
+
+function newestFirst(a, b) {
+  return Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id
+}
+
+// Pages are read until one is short; a full page at the budget means more
+// may lie beyond it, so the caller gets the error, not a partial list.
+async function readAllPages(readPage, incomplete, page = 1, items = []) {
+  if (page > MAX_PAGES) {
+    throw incomplete()
+  }
+
+  const batch = await readPage(page)
+  const all = [...items, ...batch]
+
+  return batch.length < PER_PAGE
+    ? all
+    : readAllPages(readPage, incomplete, page + 1, all)
+}
+
+// Every read goes through `retry`; a request that must not be repeated (the
+// dispatch) goes through `send` alone. Each call carries the handler's signal.
+function createTransport(clientFor, retryOptions) {
   function send(repository, route, params, signal) {
     return clientFor(repository).request(route, {
       ...parseRepository(repository),
@@ -85,53 +103,73 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
     })
   }
 
-  async function listRunPage(params, page) {
-    const { repository, workflowId, createdFrom, signal } = params
-    const { data } = await read(
-      repository,
-      ROUTES.runs,
-      {
-        workflow_id: workflowId,
-        branch: MAIN,
-        created: `>=${createdFrom}`,
-        per_page: PER_PAGE,
-        page
-      },
-      signal
+  function download(repository, url, signal) {
+    return retry(
+      () =>
+        clientFor(repository).request({
+          method: 'GET',
+          url,
+          request: { signal }
+        }),
+      { signal, ...retryOptions }
     )
-
-    return data.workflow_runs
   }
 
-  async function listCommitPage(params, page) {
-    const { repository, path, since, signal } = params
-    const { data } = await read(
-      repository,
-      ROUTES.commits,
-      { sha: MAIN, path, since, per_page: PER_PAGE, page },
-      signal
-    )
+  return { send, read, download }
+}
 
-    return data
-  }
+async function listRunPage({ read }, params, page) {
+  const { repository, workflowId, createdFrom, signal } = params
+  const { data } = await read(
+    repository,
+    ROUTES.runs,
+    {
+      workflow_id: workflowId,
+      branch: MAIN,
+      created: `>=${createdFrom}`,
+      per_page: PER_PAGE,
+      page
+    },
+    signal
+  )
 
-  // Pages are read until one is short; a full page at the budget means more
-  // may lie beyond it, so the caller gets the error, not a partial list.
-  async function readAllPages(readPage, incomplete) {
-    const items = []
+  return data.workflow_runs
+}
 
-    for (let page = 1; page <= MAX_PAGES; page += 1) {
-      const batch = await readPage(page)
+async function listCommitPage({ read }, params, page) {
+  const { repository, path, since, signal } = params
+  const { data } = await read(
+    repository,
+    ROUTES.commits,
+    { sha: MAIN, path, since, per_page: PER_PAGE, page },
+    signal
+  )
 
-      items.push(...batch)
+  return data
+}
 
-      if (batch.length < PER_PAGE) {
-        return items
-      }
+async function findReportArtifact({ read }, params, name) {
+  const { repository, runId, signal } = params
+  const { data } = await read(
+    repository,
+    ROUTES.artifacts,
+    { run_id: runId, name },
+    signal
+  ).catch((error) => {
+    if (error.status === NOT_FOUND) {
+      return { data: {} }
     }
 
-    throw incomplete()
-  }
+    throw error
+  })
+
+  return (data.artifacts ?? []).find(
+    (candidate) => candidate.name === name && !candidate.expired
+  )
+}
+
+function createRunMethods(transport) {
+  const { send, read, download } = transport
 
   return {
     async dispatchWorkflow({ repository, workflowId, inputs, signal }) {
@@ -155,7 +193,7 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
 
     async listWorkflowRuns(params) {
       const runs = await readAllPages(
-        (page) => listRunPage(params, page),
+        (page) => listRunPage(transport, params, page),
         () =>
           new RunLookupIncompleteError({
             repository: params.repository,
@@ -164,65 +202,28 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
           })
       )
 
-      return runs
-        .map(toRun)
-        .toSorted(
-          (a, b) =>
-            Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id
-        )
+      return runs.map(toRun).toSorted(newestFirst)
     },
 
-    async getRunReport({ repository, runId, runAttempt, environment, signal }) {
-      const name = `run-report-${environment}.json`
-      const { data } = await read(
-        repository,
-        ROUTES.artifacts,
-        { run_id: runId, name },
-        signal
-      ).catch((error) => {
-        if (error.status === NOT_FOUND) {
-          return { data: {} }
-        }
-
-        throw error
-      })
-      const artifact = (data.artifacts ?? []).find(
-        (candidate) => candidate.name === name && !candidate.expired
+    async getRunReport(params) {
+      const { repository, runAttempt, environment, signal } = params
+      const artifact = await findReportArtifact(
+        transport,
+        params,
+        `run-report-${environment}.json`
       )
 
       if (!artifact) {
         return null
       }
 
-      const { data: file } = await retry(
-        () =>
-          clientFor(repository).request({
-            method: 'GET',
-            url: artifact.archive_download_url,
-            request: { signal }
-          }),
-        { signal, ...retryOptions }
+      const { data: file } = await download(
+        repository,
+        artifact.archive_download_url,
+        signal
       )
 
       return reportOfAttempt(parseReport(file), runAttempt)
-    },
-
-    async listCommits(params) {
-      const commits = await readAllPages(
-        (page) => listCommitPage(params, page),
-        () =>
-          new CommitLookupIncompleteError({
-            repository: params.repository,
-            path: params.path,
-            pages: MAX_PAGES
-          })
-      )
-
-      return commits.map((commit) => ({
-        sha: commit.sha,
-        message: commit.commit.message,
-        committedAt: commit.commit.committer.date
-      }))
     },
 
     async listRunJobNames({ repository, runId, signal }) {
@@ -234,11 +235,29 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
       )
 
       return data.jobs.map((job) => job.name)
+    }
+  }
+}
+
+function createCommitMethods(transport) {
+  return {
+    async listCommits(params) {
+      const commits = await readAllPages(
+        (page) => listCommitPage(transport, params, page),
+        () =>
+          new CommitLookupIncompleteError({
+            repository: params.repository,
+            path: params.path,
+            pages: MAX_PAGES
+          })
+      )
+
+      return commits.map(toCommit)
     },
 
     async isAncestor({ repository, ancestor, descendant, signal }) {
       try {
-        const { data } = await read(
+        const { data } = await transport.read(
           repository,
           ROUTES.compare,
           { basehead: `${ancestor}...${descendant}`, per_page: 1 },
@@ -254,5 +273,25 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
         throw error
       }
     }
+  }
+}
+
+/**
+ * The `GitHubClient` port over Octokit (plan 6.1). Every read goes through
+ * `retry` (a server error or dropped connection is tried again with jittered
+ * backoff); the dispatch is never retried inside a handler, because a lost
+ * response must not become a second run: SQS redelivers the command and the
+ * handler looks for the run first. Each call carries the handler's signal.
+ * @param {object} deps
+ * @param {(repository: string) => import('octokit').Octokit} deps.clientFor - a client down-scoped to the one repository
+ * @param {object} [deps.retryOptions] - passed to `retry`
+ * @returns {import('#/github/github-client.js').GitHubClient}
+ */
+export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
+  const transport = createTransport(clientFor, retryOptions)
+
+  return {
+    ...createRunMethods(transport),
+    ...createCommitMethods(transport)
   }
 }
