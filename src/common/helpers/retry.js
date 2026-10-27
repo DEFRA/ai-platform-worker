@@ -64,15 +64,19 @@ export async function retry(
     sleep = sleepUnlessAborted
   } = {}
 ) {
-  for (let attempt = 0; ; attempt += 1) {
+  async function attempt(number) {
     try {
       return await operation()
     } catch (error) {
-      if (attempt >= retries || signal?.aborted || !isRetryable(error)) {
+      if (number >= retries || signal?.aborted || !isRetryable(error)) {
         throw error
       }
 
-      await sleep(random() * Math.min(maxMs, baseMs * 2 ** attempt), signal)
+      await sleep(random() * Math.min(maxMs, baseMs * 2 ** number), signal)
+
+      return attempt(number + 1)
     }
   }
+
+  return attempt(0)
 }

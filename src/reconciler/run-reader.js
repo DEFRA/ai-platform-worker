@@ -11,6 +11,22 @@ const MAX_APPLY_RUNS_INSPECTED = 30
 const APPLY_RUN_NAME = /^apply (\S+)/
 const PUSH_RUN_NAME = 'apply changed environments'
 
+// One run at a time, in order, until enough are found: each check costs GitHub
+// calls, so the runs are not checked together.
+async function collectContaining(runs, contains, found = []) {
+  if (runs.length === 0 || found.length >= MAX_APPLY_RUNS) {
+    return found
+  }
+
+  const [run, ...rest] = runs
+
+  return collectContaining(
+    rest,
+    contains,
+    (await contains(run)) ? [...found, run] : found
+  )
+}
+
 /**
  * Reads the runs a reconcile and a dispatch look for (plan 6.1). Pure
  * selection over the GitHub port: which run is this operation's submit, which
@@ -35,6 +51,28 @@ export function createRunReader({ github }) {
     })
 
     return jobs.some((job) => job.split(' / ').includes(environment))
+  }
+
+  async function containsCommit({
+    repository,
+    environment,
+    commit,
+    run,
+    signal
+  }) {
+    if (!(await appliesTo({ repository, environment, run, signal }))) {
+      return false
+    }
+
+    return (
+      run.headSha === commit.sha ||
+      (await github.isAncestor({
+        repository,
+        ancestor: commit.sha,
+        descendant: run.headSha,
+        signal
+      }))
+    )
   }
 
   async function submitRunsOf({
@@ -95,32 +133,10 @@ export function createRunReader({ github }) {
         createdFrom: commit.committedAt,
         signal
       })
-      const containing = []
 
-      for (const run of runs.slice(0, MAX_APPLY_RUNS_INSPECTED)) {
-        if (containing.length >= MAX_APPLY_RUNS) {
-          break
-        }
-
-        if (!(await appliesTo({ repository, environment, run, signal }))) {
-          continue
-        }
-
-        const contains =
-          run.headSha === commit.sha ||
-          (await github.isAncestor({
-            repository,
-            ancestor: commit.sha,
-            descendant: run.headSha,
-            signal
-          }))
-
-        if (contains) {
-          containing.push(run)
-        }
-      }
-
-      return containing
+      return collectContaining(runs.slice(0, MAX_APPLY_RUNS_INSPECTED), (run) =>
+        containsCommit({ repository, environment, commit, run, signal })
+      )
     }
   }
 }
