@@ -4,10 +4,11 @@ describe('#config', () => {
   test('the GitOps settings default as the plan lists them (section 5)', () => {
     expect(config.get('gitops')).toEqual({
       commandsQueueUrl: null,
-      eventsQueueUrl: null,
+      eventsTopicArn: null,
       tenantsRepo: 'DEFRA/ai-platform-tenants',
       deploymentsRepo: 'DEFRA/ai-platform-deployments',
       awsSqsEndpoint: null,
+      awsSnsEndpoint: null,
       awsRegion: 'eu-west-2',
       handlerTimeoutMs: 30000,
       sqsWaitTimeSeconds: 20,
@@ -24,10 +25,11 @@ describe('#config', () => {
     expect(JSON.stringify(config.toString())).not.toMatch(/BEGIN/)
   })
 
-  test('the queue, repository and timeout settings are read from the environment', async () => {
+  test('the queue, topic, repository and timeout settings are read from the environment', async () => {
     vi.resetModules()
     vi.stubEnv('GITOPS_COMMANDS_QUEUE_URL', 'http://floci/commands.fifo')
-    vi.stubEnv('GITOPS_EVENTS_QUEUE_URL', 'http://floci/events.fifo')
+    vi.stubEnv('GITOPS_EVENTS_TOPIC_ARN', 'arn:aws:sns:eu-west-2:0:events.fifo')
+    vi.stubEnv('AWS_SNS_ENDPOINT', 'http://floci:4566')
     vi.stubEnv('GITOPS_TENANTS_REPO', 'ORG/tenants')
     vi.stubEnv('HANDLER_TIMEOUT_MS', '1000')
     vi.stubEnv('SQS_WAIT_TIME_SECONDS', '1')
@@ -37,7 +39,10 @@ describe('#config', () => {
     expect(fresh.get('gitops.commandsQueueUrl')).toBe(
       'http://floci/commands.fifo'
     )
-    expect(fresh.get('gitops.eventsQueueUrl')).toBe('http://floci/events.fifo')
+    expect(fresh.get('gitops.eventsTopicArn')).toBe(
+      'arn:aws:sns:eu-west-2:0:events.fifo'
+    )
+    expect(fresh.get('gitops.awsSnsEndpoint')).toBe('http://floci:4566')
     expect(fresh.get('gitops.tenantsRepo')).toBe('ORG/tenants')
     expect(fresh.get('gitops.handlerTimeoutMs')).toBe(1000)
     expect(fresh.get('gitops.sqsWaitTimeSeconds')).toBe(1)

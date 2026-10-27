@@ -87,5 +87,5 @@ jobs:
 
       - run: npm ci
 
-      - name: Run the Floci suite
-        run: npx vitest run src/commands/commands-consumer.floci.test.js
+      - name: Run the Floci suites
+        run: npx vitest run src/commands/commands-consumer.floci.test.js src/events/sns-events-publisher.floci.test.js

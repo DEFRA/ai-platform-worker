@@ -15,11 +15,13 @@ It never decides, commits or watches runs on a timer: the backend owns the rules
 ## How it works
 
 ```text
-backend ──aip-gitops-commands.fifo──▶ worker ──workflow_dispatch──▶ submit.yml / apply.yml
-                                        │
-workflows ─────aip-gitops-events.fifo──▶ backend
-worker (reconcile only) ─events────────▶ backend
+backend ──topic aip_gitops_commands──▶ queue aip_gitops_commands_worker ──▶ worker ──workflow_dispatch──▶ submit.yml / apply.yml
+                                                                              │
+worker (reconcile only) ──topic aip_gitops_events_worker──▶ queue aip_gitops_events ──▶ backend
+workflows ─────────────────(federated identity, sqs:SendMessage)──▶ queue aip_gitops_events ──▶ backend
 ```
+
+CDP lets one service operate on a queue, so each direction is a topic its producer owns and a queue its consumer owns, subscribed by CDP with raw delivery (the queue body is the message, with no SNS envelope). The backend owns the commands topic and the events queue; the worker owns the commands queue and the events topic; the workflows are external and send to the backend's events queue through a federated identity.
 
 | Command     | The worker                                                                                                                                                                                                                                                                      |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -62,28 +64,28 @@ The worker and the workflows (`ai-platform-workflows` `src/resources.js`) each f
 
 Read through `convict` (`src/config.js`, `src/config-gitops.js`, `src/config-github.js`). Secrets and CDP configuration live in the CDP Portal and `cdp-app-config`; a change applies on redeploy.
 
-| Variable                                      | Default                         | Meaning                                                                               |
-| --------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- |
-| `GITOPS_COMMANDS_QUEUE_URL`                   | none, required                  | `aip-gitops-commands.fifo`, consumed                                                  |
-| `GITOPS_EVENTS_QUEUE_URL`                     | none, required                  | `aip-gitops-events.fifo`, sent to by the reconciler                                   |
-| `GITOPS_TENANTS_REPO`                         | `DEFRA/ai-platform-tenants`     | State repository for team files                                                       |
-| `GITOPS_DEPLOYMENTS_REPO`                     | `DEFRA/ai-platform-deployments` | State repository for pins                                                             |
-| `HANDLER_TIMEOUT_MS`                          | `30000`                         | One command, and every outbound call it makes; keep below the 60 s visibility timeout |
-| `SQS_WAIT_TIME_SECONDS`                       | `20`                            | Long polling                                                                          |
-| `GITOPS_SHUTDOWN_WAIT_MS`                     | `20000`                         | How long a stopping worker waits for the command in flight                            |
-| `AWS_SQS_ENDPOINT`                            | unset                           | Local only (Floci)                                                                    |
-| `AWS_REGION`                                  | `eu-west-2`                     |                                                                                       |
-| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID` | none, required                  | The `ai-platform-orchestrator` App                                                    |
-| `GITHUB_APP_PRIVATE_KEY`                      | none, required                  | CDP secret, base64 on one line                                                        |
+| Variable                                      | Default                         | Meaning                                                                                 |
+| --------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------- |
+| `GITOPS_COMMANDS_QUEUE_URL`                   | none, required                  | `aip_gitops_commands_worker.fifo`, the worker's own queue, consumed                     |
+| `GITOPS_EVENTS_TOPIC_ARN`                     | none, required                  | `aip_gitops_events_worker.fifo`, the worker's own topic, published to by the reconciler |
+| `GITOPS_TENANTS_REPO`                         | `DEFRA/ai-platform-tenants`     | State repository for team files                                                         |
+| `GITOPS_DEPLOYMENTS_REPO`                     | `DEFRA/ai-platform-deployments` | State repository for pins                                                               |
+| `HANDLER_TIMEOUT_MS`                          | `30000`                         | One command, and every outbound call it makes; keep below the 60 s visibility timeout   |
+| `SQS_WAIT_TIME_SECONDS`                       | `20`                            | Long polling                                                                            |
+| `GITOPS_SHUTDOWN_WAIT_MS`                     | `20000`                         | How long a stopping worker waits for the command in flight                              |
+| `AWS_SQS_ENDPOINT`, `AWS_SNS_ENDPOINT`        | unset                           | Local only (Floci)                                                                      |
+| `AWS_REGION`                                  | `eu-west-2`                     |                                                                                         |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID` | none, required                  | The `ai-platform-orchestrator` App                                                      |
+| `GITHUB_APP_PRIVATE_KEY`                      | none, required                  | CDP secret, base64 on one line                                                          |
 
-The worker refuses to start without both queue URLs and the three App settings. Its installation tokens are minted per repository with `actions: write`, `contents: read` and `metadata: read` only, and the client refuses every request except a read and a workflow dispatch. Outbound HTTP goes through the CDP proxy (Node 24 reads `HTTPS_PROXY`); the GitHub API and artifact hosts are allowed in `cdp-tenant-config`.
+The worker refuses to start without the commands queue URL, the events topic ARN and the three App settings. Its installation tokens are minted per repository with `actions: write`, `contents: read` and `metadata: read` only, and the client refuses every request except a read and a workflow dispatch. Outbound HTTP goes through the CDP proxy (Node 24 reads `HTTPS_PROXY`); the GitHub API and artifact hosts are allowed in `cdp-tenant-config`.
 
 ## Run locally
 
 For testing only; CDP environments run the deployed service.
 
 ```bash
-docker compose up floci -d          # both FIFO queues and their dead-letter queues
+docker compose up floci -d          # both FIFO topics, both queues and their dead-letter queues, subscribed with raw delivery
 ```
 
 Floci is pinned to `floci/floci:2.3.0-compat` by digest in `compose.yml` and in the `floci` CI job, so the local run and CI use the same emulator; change both together. The `-compat` image has the `aws` CLI the queue script calls. The new image has not been started here (no Docker daemon): the script and the init directory path are unverified against it.
@@ -91,17 +93,17 @@ Floci is pinned to `floci/floci:2.3.0-compat` by digest in `compose.yml` and in 
 Then, with the App credentials in your shell (never in a file in this repository):
 
 ```bash
-export AWS_SQS_ENDPOINT=http://localhost:4566
-export GITOPS_COMMANDS_QUEUE_URL=http://localhost:4566/000000000000/aip-gitops-commands.fifo
-export GITOPS_EVENTS_QUEUE_URL=http://localhost:4566/000000000000/aip-gitops-events.fifo
+export AWS_SQS_ENDPOINT=http://localhost:4566 AWS_SNS_ENDPOINT=http://localhost:4566
+export GITOPS_COMMANDS_QUEUE_URL=http://localhost:4566/000000000000/aip_gitops_commands_worker.fifo
+export GITOPS_EVENTS_TOPIC_ARN=arn:aws:sns:eu-west-2:000000000000:aip_gitops_events_worker.fifo
 export GITHUB_APP_ID=... GITHUB_APP_INSTALLATION_ID=... GITHUB_APP_PRIVATE_KEY=...
 npm run dev
 ```
 
-`GET http://localhost:3001/health` is `200` while the consumer runs and `503` once it has stopped. The backend's local run (`TENANT_ORCHESTRATOR=sqs` with the same queue URLs) sends it commands. The queues are created by `compose/floci/start.d/20-gitops-queues.sh` (the same four CDP creates: both FIFO, no content-based deduplication, 60 s visibility, dead-letter after 3 receives). Automated unit tests never use the network: GitHub and SQS are faked (see [testing.instructions.md](.github/instructions/testing.instructions.md)). A separate suite, `src/commands/commands-consumer.floci.test.js`, proves the FIFO behaviour `sqs-consumer` does not test (order in a message group, deduplication, the dead-letter queue after three receives) against Floci. It is skipped unless `FLOCI_ENDPOINT` is set, so `npm test` skips it cleanly; the `floci` job of `check-pull-request.yml` runs it on every pull request against a Floci service container, and a developer with Docker can run it:
+`GET http://localhost:3001/health` is `200` while the consumer runs and `503` once it has stopped. The backend's local run (`TENANT_ORCHESTRATOR=sqs` with its commands topic ARN and events queue URL) sends it commands. The topics, queues and subscriptions are created by `compose/floci/start.d/20-gitops-queues.sh` (the same CDP creates: all FIFO, no content-based deduplication, queues with 60 s visibility and dead-letter after 3 receives, raw delivery). Automated unit tests never use the network: GitHub, SQS and SNS are faked (see [testing.instructions.md](.github/instructions/testing.instructions.md)). Two separate suites run against Floci: `src/commands/commands-consumer.floci.test.js` proves the FIFO behaviour `sqs-consumer` does not test (order in a message group, deduplication, the dead-letter queue after three receives), and `src/events/sns-events-publisher.floci.test.js` proves an event reaches the subscribed queue as the same JSON, with no SNS envelope, and a repeated event ID collapses. It is skipped unless `FLOCI_ENDPOINT` is set, so `npm test` skips it cleanly; the `floci` job of `check-pull-request.yml` runs them on every pull request against a Floci service container, and a developer with Docker can run them:
 
 ```bash
-FLOCI_ENDPOINT=http://localhost:4566 npx vitest run src/commands/commands-consumer.floci.test.js
+FLOCI_ENDPOINT=http://localhost:4566 npx vitest run src/commands/commands-consumer.floci.test.js src/events/sns-events-publisher.floci.test.js
 ```
 
 ## Observability
@@ -120,7 +122,7 @@ FLOCI_ENDPOINT=http://localhost:4566 npx vitest run src/commands/commands-consum
 
 A command reaches the dead-letter queue after three failed receives: the handler threw (GitHub or SQS was down for longer than the retries), the message was not a valid command, or it named a repository or path the worker is not for. The alarm names the queue.
 
-1. The alarm names the DLQ: `aip-gitops-commands-deadletter.fifo` or `aip-gitops-events-deadletter.fifo` (CDP's `-deadletter` suffix; confirm the exact names in the CDP Portal when the queues are created).
+1. The alarm names the DLQ. The worker owns and can redrive `aip_gitops_commands_worker-deadletter.fifo`; `aip_gitops_events-deadletter.fifo` belongs to `ai-platform-backend-api`, so only that service can redrive it (CDP's `-deadletter` suffix; confirm the exact names in the CDP Portal when the queues are created).
 2. View the message in the CDP or AWS console (viewing hides it for the visibility timeout and does not affect the source queue's order); note `operationId` and `type` (commands) or `status` (events). Find the worker's log lines by `commandId` or `operationId` for the reason. If the operation has moved past it, delete the message.
 3. Fix the cause, then move it back: console "Start DLQ redrive", or `aws sqs start-message-move-task --source-arn {dlq-arn}` from the CDP Terminal. Deduplication by command and event ID makes a repeat safe, and the worker dispatches nothing for a run it already started. A message that is not a valid command, or is for the wrong repository, will fail again: delete it and fix the sender.
 4. Confirm the operation moves; record the incident.

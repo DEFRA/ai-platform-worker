@@ -8,11 +8,14 @@ import { createFakeMetrics } from '../test/fakes/fake-metrics.js'
 import { createWorkerRuntime } from '#/worker-runtime.js'
 
 const SETTINGS = {
-  commandsQueueUrl: 'http://floci:4566/000000000000/aip-gitops-commands.fifo',
-  eventsQueueUrl: 'http://floci:4566/000000000000/aip-gitops-events.fifo',
+  commandsQueueUrl:
+    'http://floci:4566/000000000000/aip_gitops_commands_worker.fifo',
+  eventsTopicArn:
+    'arn:aws:sns:eu-west-2:000000000000:aip_gitops_events_worker.fifo',
   tenantsRepo: TENANTS_REPO,
   deploymentsRepo: DEPLOYMENTS_REPO,
   awsSqsEndpoint: 'http://floci:4566',
+  awsSnsEndpoint: 'http://floci:4566',
   awsRegion: 'eu-west-2',
   handlerTimeoutMs: 30000,
   sqsWaitTimeSeconds: 20,
@@ -26,10 +29,17 @@ function build(settings = SETTINGS) {
   const createConsumer = vi.fn().mockReturnValue(consumer)
   const sqs = { send: vi.fn() }
   const createClient = vi.fn().mockReturnValue(sqs)
+  const createTopicClient = vi.fn().mockReturnValue({ send: vi.fn() })
   const createAppClient = vi.fn().mockReturnValue({ request: vi.fn() })
   const runtime = createWorkerRuntime(
     { logger, metrics },
-    { settings, createClient, createAppClient, createConsumer }
+    {
+      settings,
+      createClient,
+      createTopicClient,
+      createAppClient,
+      createConsumer
+    }
   )
 
   return {
@@ -37,6 +47,7 @@ function build(settings = SETTINGS) {
     consumer,
     createConsumer,
     createClient,
+    createTopicClient,
     createAppClient,
     metrics,
     logger,
@@ -93,10 +104,27 @@ describe('#worker-runtime', () => {
   })
 
   test('uses no endpoint override on CDP', () => {
-    const { createClient } = build({ ...SETTINGS, awsSqsEndpoint: null })
+    const { createClient, createTopicClient } = build({
+      ...SETTINGS,
+      awsSqsEndpoint: null,
+      awsSnsEndpoint: null
+    })
 
     expect(createClient).toHaveBeenCalledWith({
       endpoint: undefined,
+      region: 'eu-west-2'
+    })
+    expect(createTopicClient).toHaveBeenCalledWith({
+      endpoint: undefined,
+      region: 'eu-west-2'
+    })
+  })
+
+  test('creates the SNS client for the local endpoint and region', () => {
+    const { createTopicClient } = build()
+
+    expect(createTopicClient).toHaveBeenCalledWith({
+      endpoint: 'http://floci:4566',
       region: 'eu-west-2'
     })
   })
@@ -120,10 +148,10 @@ describe('#worker-runtime', () => {
 
   test.each([
     ['no commands queue', { commandsQueueUrl: null }],
-    ['no events queue', { eventsQueueUrl: null }]
+    ['no events topic', { eventsTopicArn: null }]
   ])('fails at once with %s', (_name, change) => {
     expect(() => build({ ...SETTINGS, ...change })).toThrow(
-      'GITOPS_COMMANDS_QUEUE_URL and GITOPS_EVENTS_QUEUE_URL must both be set'
+      'GITOPS_COMMANDS_QUEUE_URL and GITOPS_EVENTS_TOPIC_ARN must both be set'
     )
   })
 
@@ -136,6 +164,7 @@ describe('#worker-runtime', () => {
         {
           settings: SETTINGS,
           createClient: vi.fn().mockReturnValue({}),
+          createTopicClient: vi.fn().mockReturnValue({}),
           createConsumer: vi.fn()
         }
       )
@@ -154,6 +183,7 @@ describe('#worker-runtime', () => {
       {
         settings: SETTINGS,
         createClient: vi.fn().mockReturnValue({ send: vi.fn() }),
+        createTopicClient: vi.fn().mockReturnValue({ send: vi.fn() }),
         createAppClient,
         createConsumer
       }

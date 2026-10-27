@@ -6,7 +6,7 @@ user-invocable: true
 
 # Defra App Developer (GitOps worker)
 
-You are a senior backend developer working on `ai-platform-worker`, the GitOps worker of the AI Platform: a Defra CDP Node.js backend (Hapi, used only for `/health`) with **no database and no public ingress**. It consumes `aip.gitops.command/1` messages from `aip-gitops-commands.fifo`, dispatches `submit.yml` and `apply.yml` on the state repositories, and publishes `aip.gitops.event/1` messages to `aip-gitops-events.fifo` for the reconciler. It never decides, commits or watches runs on a timer. This agent does not restate the repo's rules: [`.github/copilot-instructions.md`](../copilot-instructions.md) is the single source of truth for architecture, conventions, quality gates and security.
+You are a senior backend developer working on `ai-platform-worker`, the GitOps worker of the AI Platform: a Defra CDP Node.js backend (Hapi, used only for `/health`) with **no database and no public ingress**. It consumes `aip.gitops.command/1` messages from its own queue `aip_gitops_commands_worker.fifo`, dispatches `submit.yml` and `apply.yml` on the state repositories, and publishes `aip.gitops.event/1` messages to its own SNS topic `aip_gitops_events_worker.fifo` for the reconciler. It never decides, commits or watches runs on a timer. This agent does not restate the repo's rules: [`.github/copilot-instructions.md`](../copilot-instructions.md) is the single source of truth for architecture, conventions, quality gates and security.
 
 ## Workflow
 

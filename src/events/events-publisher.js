@@ -1,9 +1,10 @@
 import { validateEvent } from '#/contracts/message-validators.js'
 
 /**
- * The port for handing an event to the queue the backend consumes
- * (`aip-gitops-events.fifo`). An event is an `aip.gitops.event/1` message.
- * `publish` resolves once the queue has accepted it, rejects when it could
+ * The port for handing an event to the backend. The adapter publishes to the
+ * worker's SNS topic `aip_gitops_events_worker.fifo`, which CDP delivers to the
+ * queue the backend consumes. An event is an `aip.gitops.event/1` message.
+ * `publish` resolves once the topic has accepted it, rejects when it could
  * not be sent, and refuses (rejects without sending) an event that fails the
  * schema, so a bug can never put a bad message on the queue.
  *

@@ -5,18 +5,18 @@
  */
 export const gitopsConfigSchema = {
   commandsQueueUrl: {
-    doc: 'URL of aip-gitops-commands.fifo, which the worker consumes commands from; required to run',
+    doc: 'URL of the worker-owned commands queue (aip_gitops_commands_worker.fifo), subscribed to the backend-owned commands topic; the worker consumes commands from it; required to run',
     format: String,
     nullable: true,
     default: null,
     env: 'GITOPS_COMMANDS_QUEUE_URL'
   },
-  eventsQueueUrl: {
-    doc: 'URL of aip-gitops-events.fifo, which the worker sends reconciler events to; required to run',
+  eventsTopicArn: {
+    doc: 'ARN of the worker-owned events topic (aip_gitops_events_worker.fifo), which the backend-owned events queue is subscribed to; the worker publishes reconciler events to it; required to run',
     format: String,
     nullable: true,
     default: null,
-    env: 'GITOPS_EVENTS_QUEUE_URL'
+    env: 'GITOPS_EVENTS_TOPIC_ARN'
   },
   tenantsRepo: {
     doc: 'owner/repo holding team files; the worker dispatches its submit.yml and apply.yml and reads its runs and commits',
@@ -37,8 +37,15 @@ export const gitopsConfigSchema = {
     default: null,
     env: 'AWS_SQS_ENDPOINT'
   },
+  awsSnsEndpoint: {
+    doc: 'SNS endpoint override for local runs (Floci); unset on CDP',
+    format: String,
+    nullable: true,
+    default: null,
+    env: 'AWS_SNS_ENDPOINT'
+  },
   awsRegion: {
-    doc: 'AWS region of the GitOps queues',
+    doc: 'AWS region of the GitOps queue and topic',
     format: String,
     default: 'eu-west-2',
     env: 'AWS_REGION'

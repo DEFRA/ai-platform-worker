@@ -5,7 +5,7 @@ applyTo: 'src/contracts/**, src/commands/**, src/events/**, src/sqs/**, src/reco
 
 # Message contracts
 
-The worker and the backend talk through two FIFO queues, `aip-gitops-commands.fifo` (the backend sends, the worker consumes) and `aip-gitops-events.fifo` (the workflows and the worker's reconciler send, the backend consumes), using the `aip.gitops.command/1` and `aip.gitops.event/1` schemas. The design is [async-operations-plan.md](../../../ai-platform-discovery-docs/docs/async-operations-plan.md) section 5.
+The worker and the backend talk through FIFO topics and queues, one owner each (CDP allows one service per queue): the backend publishes to its topic `aip_gitops_commands` and the worker consumes its own queue `aip_gitops_commands_worker`; the worker's reconciler publishes to its topic `aip_gitops_events_worker` and the backend consumes its own queue `aip_gitops_events`, which the workflows also send to through a federated identity. CDP subscribes with raw delivery, so a queue body is the message itself. They use the `aip.gitops.command/1` and `aip.gitops.event/1` schemas. The design is [async-operations-plan.md](../../../ai-platform-discovery-docs/docs/async-operations-plan.md) section 5.
 
 - **The schemas are vendored.** `src/contracts/aip-gitops/` is a copy of `ai-platform-infra/schemas/messages/` at the ref in its `VERSION` file. Change it only with `npm run contracts:sync -- {ref}`; `npm run contracts:check` fails on any difference. Never edit a schema in this repo.
 - **Additive only.** A new optional field or status is allowed; renaming, removing or tightening one is not, because the backend, the worker and the workflows deploy on their own schedule.

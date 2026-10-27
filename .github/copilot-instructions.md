@@ -1,6 +1,6 @@
 # Project Guidelines
 
-**ai-platform-worker** is the AI Platform GitOps worker (the `ai-platform-gitops-worker` service of plan section 7): a Core Delivery Platform (CDP) Node.js backend with **no database and no public ingress**. It consumes GitOps commands from SQS, dispatches `submit.yml` and `apply.yml` on the state repositories, and reconciles overdue operations by reading GitHub. The design is [async-operations-plan.md](../../ai-platform-discovery-docs/docs/async-operations-plan.md) (D09, revised 25 October 2026): contracts section 5, modules section 6.1, standards section 7, quality bar section 8.
+**ai-platform-worker** is the AI Platform GitOps worker (the `ai-platform-gitops-worker` service of plan section 7): a Core Delivery Platform (CDP) Node.js backend with **no database and no public ingress**. It consumes GitOps commands from its own SQS queue, publishes reconciler events to its own SNS topic, dispatches `submit.yml` and `apply.yml` on the state repositories, and reconciles overdue operations by reading GitHub. The design is [async-operations-plan.md](../../ai-platform-discovery-docs/docs/async-operations-plan.md) (D09, revised 25 October 2026): contracts section 5, modules section 6.1, standards section 7, quality bar section 8.
 
 The worker never decides, commits or watches runs on a timer. The backend owns the rules and the only database; the workflows commit and apply; the worker dispatches and reports what GitHub holds.
 
@@ -10,7 +10,7 @@ The worker never decides, commits or watches runs on a timer. The backend owns t
   - `src/commands/` is the inbound adapter (`commands-consumer.js`: schema check, handler map by `type`) and the handlers (`handlers/submit.js`, `apply.js`, `reconcile.js`)
   - `src/github/` is the `GitHubClient` port (`github-client.js`), its Octokit adapter (`octokit-github-client.js`), the down-scoped App client (`github-app-client.js`) and the workflow dispatcher
   - `src/reconciler/` is GitHub facts to an event: `run-reader.js`, `commit-finder.js`, `status-mapper.js` and `resources-mapper.js` (the last two are pure)
-  - `src/events/` is the `EventsPublisher` port and its SQS FIFO adapter
+  - `src/events/` is the `EventsPublisher` port and its SNS FIFO adapter
   - `src/contracts/` holds the vendored message schemas and the Ajv validators
   - `src/worker-runtime.js` is the one composition root; `src/plugins/gitops-worker.js` runs it inside Hapi; `/health` is the only route
 - **Handlers return an outcome string and throw on failure.** A throw leaves the message on the queue, SQS redelivers it, and after three receives it reaches the dead-letter queue (AC8).
@@ -63,7 +63,7 @@ CI (`.github/workflows/check-pull-request.yml`) runs `npm run security-audit`, `
 
 ## Allowed / discouraged dependencies
 
-- Hapi (health only), `sqs-consumer` 15 and `@aws-sdk/client-sqs` for queues, `octokit` and `@octokit/auth-app` for GitHub, `ajv` and `ajv-formats` for the contracts, `convict`, `pino`.
+- Hapi (health only), `sqs-consumer` 15, `@aws-sdk/client-sqs` for the commands queue and `@aws-sdk/client-sns` for the events topic, `octokit` and `@octokit/auth-app` for GitHub, `ajv` and `ajv-formats` for the contracts, `convict`, `pino`.
 - Native `fetch`; no `axios` or `request`. No `lodash`, `moment`, TypeScript (vanilla JS with JSDoc) or ORM. No database: if a change seems to need state, it belongs in the backend.
 - Exact versions only (`.npmrc`: `save-exact`, `ignore-scripts`, `min-release-age=7`). New dependencies must be widely used, maintained and compatible with Node 24.
 
