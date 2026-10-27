@@ -1,4 +1,8 @@
-import { APPLY_WORKFLOW, SUBMIT_WORKFLOW } from '#/github/github-client.js'
+import {
+  APPLY_WORKFLOW,
+  RunLookupIncompleteError,
+  SUBMIT_WORKFLOW
+} from '#/github/github-client.js'
 
 // How many apply runs of the environment that contain a commit are kept,
 // newest first, and how many runs are inspected to find them: an operation's
@@ -123,7 +127,9 @@ export function createRunReader({ github }) {
      * head is the commit or a descendant), newest first. A run created before
      * the commit cannot contain it, so the search starts at the commit's
      * time. An apply of another environment is never returned: its progress
-     * says nothing about this operation.
+     * says nothing about this operation. Throws `RunLookupIncompleteError`
+     * when more runs lie beyond the ones inspected and too few were found, as
+     * a missing run must not be read as the absence of an apply.
      * @param {{repository: string, environment: string, commit: {sha: string, committedAt: string}, signal?: AbortSignal}} params
      * @returns {Promise<import('#/github/github-client.js').WorkflowRun[]>}
      */
@@ -134,10 +140,27 @@ export function createRunReader({ github }) {
         createdFrom: commit.committedAt,
         signal
       })
-
-      return collectContaining(runs.slice(0, MAX_APPLY_RUNS_INSPECTED), (run) =>
-        containsCommit({ repository, environment, commit, run, signal })
+      const containing = await collectContaining(
+        runs.slice(0, MAX_APPLY_RUNS_INSPECTED),
+        (run) =>
+          containsCommit({ repository, environment, commit, run, signal })
       )
+
+      // Runs left unread may be the environment's own: their absence from the
+      // answer is not evidence that there is no apply, so the caller must not
+      // dispatch one. Enough found is complete, for the newest decide.
+      if (
+        containing.length < MAX_APPLY_RUNS &&
+        runs.length > MAX_APPLY_RUNS_INSPECTED
+      ) {
+        throw new RunLookupIncompleteError({
+          repository,
+          workflowId: APPLY_WORKFLOW,
+          budget: `the ${MAX_APPLY_RUNS_INSPECTED} newest runs read`
+        })
+      }
+
+      return containing
     }
   }
 }

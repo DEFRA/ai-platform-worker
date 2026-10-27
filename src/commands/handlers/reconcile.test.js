@@ -18,7 +18,10 @@ import {
 } from '../../../test/fakes/in-memory-github-client.js'
 import { createWorld } from '../../../test/fakes/world.js'
 import { createReconcileHandler } from '#/commands/handlers/reconcile.js'
-import { CommitLookupIncompleteError } from '#/github/github-client.js'
+import {
+  CommitLookupIncompleteError,
+  RunLookupIncompleteError
+} from '#/github/github-client.js'
 import { createOctokitGitHubClient } from '#/github/octokit-github-client.js'
 import {
   applyInputs,
@@ -876,6 +879,80 @@ describe('#reconcile handler', () => {
         status: 'deployed',
         runId: 2001,
         environment: 'infradev'
+      })
+    })
+
+    describe('the 30 newest apply runs are all the lookup reads', () => {
+      const INSPECTED = 30
+      const INFRADEV_RUN = applyRun({
+        id: 3000,
+        name: 'apply infradev portal op-7f3c9a1e 0190-mine',
+        status: 'in_progress',
+        conclusion: null,
+        createdAt: '2026-10-26T12:01:00Z'
+      })
+
+      // Newer applies of another environment, newest first once sorted.
+      function prodRuns(count) {
+        return Array.from({ length: count }, (_, index) =>
+          applyRun({
+            id: 4000 + index,
+            name: `apply prod portal op-other-${index} 0190-other`,
+            status: 'in_progress',
+            conclusion: null,
+            headSha: 'b'.repeat(40),
+            createdAt: `2026-10-26T12:10:${String(index).padStart(2, '0')}Z`
+          })
+        )
+      }
+
+      function seedBehind(world, count) {
+        withCommit(world)
+        world.github.seedAncestor(TENANTS_REPO, SHA, 'b'.repeat(40))
+        world.github.seedRuns(TENANTS_REPO, 'apply.yml', [
+          INFRADEV_RUN,
+          ...prodRuns(count)
+        ])
+      }
+
+      test('the environment’s apply behind 30 newer runs of another environment fails closed: nothing is dispatched or published, so the command is redelivered', async () => {
+        const world = createWorld()
+
+        seedBehind(world, INSPECTED)
+
+        await expect(
+          world.reconcile(committed(), context(world))
+        ).rejects.toBeInstanceOf(RunLookupIncompleteError)
+        expect(world.github.dispatches).toEqual([])
+        expect(world.events.events).toEqual([])
+      })
+
+      test('the environment’s apply within the 30 newest runs is still used', async () => {
+        const world = createWorld()
+
+        seedBehind(world, INSPECTED - 1)
+
+        await expect(
+          world.reconcile(committed(), context(world))
+        ).resolves.toBe('deploying')
+        expect(world.events.events[0]).toMatchObject({
+          status: 'deploying',
+          runId: 3000
+        })
+        expect(world.github.dispatches).toEqual([])
+      })
+
+      test('30 runs of another environment and no more is the whole list: a fresh apply is dispatched', async () => {
+        const world = createWorld()
+
+        withCommit(world)
+        world.github.seedAncestor(TENANTS_REPO, SHA, 'b'.repeat(40))
+        world.github.seedRuns(TENANTS_REPO, 'apply.yml', prodRuns(INSPECTED))
+
+        await expect(
+          world.reconcile(committed(), context(world))
+        ).resolves.toBe('dispatched')
+        expect(world.github.dispatches).toHaveLength(1)
       })
     })
 

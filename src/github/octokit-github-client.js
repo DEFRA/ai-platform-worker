@@ -198,7 +198,7 @@ function createRunMethods(transport) {
           new RunLookupIncompleteError({
             repository: params.repository,
             workflowId: params.workflowId,
-            pages: MAX_PAGES
+            budget: `${MAX_PAGES} pages`
           })
       )
 

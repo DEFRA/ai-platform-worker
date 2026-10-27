@@ -54,14 +54,18 @@ export const APPLY_WORKFLOW = 'apply.yml'
 export const MAIN = 'main'
 
 /**
- * The run lookup reached its page budget with a full page, so runs may lie
- * beyond it. A caller that dispatches when it finds no run must not take the
- * search for complete: the handler fails, and SQS redelivers the command.
+ * The run lookup reached its budget (a page limit with a full page, or the
+ * number of runs a caller inspects), so runs may lie beyond it. A caller that
+ * dispatches when it finds no run must not take the search for complete: the
+ * handler fails, and SQS redelivers the command.
  */
 export class RunLookupIncompleteError extends Error {
-  constructor({ repository, workflowId, pages }) {
+  /**
+   * @param {{repository: string, workflowId: string, budget: string}} details - `budget` says what was filled, such as "3 pages"
+   */
+  constructor({ repository, workflowId, budget }) {
     super(
-      `The runs of ${workflowId} in ${repository} fill ${pages} pages, so the search for a run is incomplete`
+      `The runs of ${workflowId} in ${repository} fill ${budget}, so the search for a run is incomplete`
     )
     this.name = 'RunLookupIncompleteError'
   }
