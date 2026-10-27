@@ -31,6 +31,104 @@ async function collectContaining(runs, contains, found = []) {
   )
 }
 
+// A dispatched apply names its environment. A push apply covers every
+// environment that changed, so its jobs say which: a reusable workflow's
+// job reads `{caller job} / {job}`, and the matrix job is the environment.
+async function appliesTo(github, { repository, environment, run, signal }) {
+  const named = APPLY_RUN_NAME.exec(run.name)
+
+  if (named && !run.name.startsWith(PUSH_RUN_NAME)) {
+    return named[1] === environment
+  }
+
+  const jobs = await github.listRunJobNames({
+    repository,
+    runId: run.id,
+    signal
+  })
+
+  return jobs.some((job) => job.split(' / ').includes(environment))
+}
+
+async function containsCommit(github, params) {
+  const { repository, commit, run, signal } = params
+
+  if (!(await appliesTo(github, params))) {
+    return false
+  }
+
+  if (run.headSha === commit.sha) {
+    return true
+  }
+
+  return github.isAncestor({
+    repository,
+    ancestor: commit.sha,
+    descendant: run.headSha,
+    signal
+  })
+}
+
+async function findSubmitRuns(
+  github,
+  { repository, operationId, createdFrom, signal }
+) {
+  const runs = await github.listWorkflowRuns({
+    repository,
+    workflowId: SUBMIT_WORKFLOW,
+    createdFrom,
+    signal
+  })
+
+  // `submit.yml`'s run-name ends with `({operationId})`.
+  return runs.filter((run) => run.name.includes(`(${operationId})`))
+}
+
+async function findDispatchedApply(
+  github,
+  { repository, commandId, createdFrom, signal }
+) {
+  const runs = await github.listWorkflowRuns({
+    repository,
+    workflowId: APPLY_WORKFLOW,
+    createdFrom,
+    signal
+  })
+
+  return runs.find((run) => run.name.includes(commandId))
+}
+
+async function findAppliesContaining(github, params) {
+  const { repository, environment, commit, signal } = params
+  const runs = await github.listWorkflowRuns({
+    repository,
+    workflowId: APPLY_WORKFLOW,
+    createdFrom: commit.committedAt,
+    signal
+  })
+  const containing = await collectContaining(
+    runs.slice(0, MAX_APPLY_RUNS_INSPECTED),
+    (run) =>
+      containsCommit(github, { repository, environment, commit, run, signal })
+  )
+
+  // Runs left unread may be the environment's own: their absence from the
+  // answer is not evidence that there is no apply, so the caller must not
+  // dispatch one. Enough found is complete, for the newest decide.
+  if (
+    containing.length < MAX_APPLY_RUNS &&
+    runs.length > MAX_APPLY_RUNS_INSPECTED
+  ) {
+    throw new RunLookupIncompleteError({
+      repository,
+      workflowId: APPLY_WORKFLOW,
+      budget: `the ${MAX_APPLY_RUNS_INSPECTED} newest runs read`
+    })
+  }
+
+  return containing
+}
+
 /**
  * Reads the runs a reconcile and a dispatch look for (plan 6.1). Pure
  * selection over the GitHub port: which run is this operation's submit, which
@@ -38,72 +136,13 @@ async function collectContaining(runs, contains, found = []) {
  * @param {{github: import('#/github/github-client.js').GitHubClient}} deps
  */
 export function createRunReader({ github }) {
-  // A dispatched apply names its environment. A push apply covers every
-  // environment that changed, so its jobs say which: a reusable workflow's
-  // job reads `{caller job} / {job}`, and the matrix job is the environment.
-  async function appliesTo({ repository, environment, run, signal }) {
-    const named = APPLY_RUN_NAME.exec(run.name)
-
-    if (named && !run.name.startsWith(PUSH_RUN_NAME)) {
-      return named[1] === environment
-    }
-
-    const jobs = await github.listRunJobNames({
-      repository,
-      runId: run.id,
-      signal
-    })
-
-    return jobs.some((job) => job.split(' / ').includes(environment))
-  }
-
-  async function containsCommit({
-    repository,
-    environment,
-    commit,
-    run,
-    signal
-  }) {
-    if (!(await appliesTo({ repository, environment, run, signal }))) {
-      return false
-    }
-
-    if (run.headSha === commit.sha) {
-      return true
-    }
-
-    return github.isAncestor({
-      repository,
-      ancestor: commit.sha,
-      descendant: run.headSha,
-      signal
-    })
-  }
-
-  async function submitRunsOf({
-    repository,
-    operationId,
-    createdFrom,
-    signal
-  }) {
-    const runs = await github.listWorkflowRuns({
-      repository,
-      workflowId: SUBMIT_WORKFLOW,
-      createdFrom,
-      signal
-    })
-
-    // `submit.yml`'s run-name ends with `({operationId})`.
-    return runs.filter((run) => run.name.includes(`(${operationId})`))
-  }
-
   return {
     /**
      * The submit runs of an operation created from the time, newest first.
      * @param {{repository: string, operationId: string, createdFrom: string, signal?: AbortSignal}} params
      * @returns {Promise<import('#/github/github-client.js').WorkflowRun[]>}
      */
-    findSubmitRuns: submitRunsOf,
+    findSubmitRuns: (params) => findSubmitRuns(github, params),
 
     /**
      * The apply run a command already dispatched, found by its command ID in
@@ -111,16 +150,7 @@ export function createRunReader({ github }) {
      * @param {{repository: string, commandId: string, createdFrom: string, signal?: AbortSignal}} params
      * @returns {Promise<import('#/github/github-client.js').WorkflowRun|undefined>}
      */
-    async findDispatchedApply({ repository, commandId, createdFrom, signal }) {
-      const runs = await github.listWorkflowRuns({
-        repository,
-        workflowId: APPLY_WORKFLOW,
-        createdFrom,
-        signal
-      })
-
-      return runs.find((run) => run.name.includes(commandId))
-    },
+    findDispatchedApply: (params) => findDispatchedApply(github, params),
 
     /**
      * The latest apply runs of one environment that contain a commit (their
@@ -133,34 +163,6 @@ export function createRunReader({ github }) {
      * @param {{repository: string, environment: string, commit: {sha: string, committedAt: string}, signal?: AbortSignal}} params
      * @returns {Promise<import('#/github/github-client.js').WorkflowRun[]>}
      */
-    async findAppliesContaining({ repository, environment, commit, signal }) {
-      const runs = await github.listWorkflowRuns({
-        repository,
-        workflowId: APPLY_WORKFLOW,
-        createdFrom: commit.committedAt,
-        signal
-      })
-      const containing = await collectContaining(
-        runs.slice(0, MAX_APPLY_RUNS_INSPECTED),
-        (run) =>
-          containsCommit({ repository, environment, commit, run, signal })
-      )
-
-      // Runs left unread may be the environment's own: their absence from the
-      // answer is not evidence that there is no apply, so the caller must not
-      // dispatch one. Enough found is complete, for the newest decide.
-      if (
-        containing.length < MAX_APPLY_RUNS &&
-        runs.length > MAX_APPLY_RUNS_INSPECTED
-      ) {
-        throw new RunLookupIncompleteError({
-          repository,
-          workflowId: APPLY_WORKFLOW,
-          budget: `the ${MAX_APPLY_RUNS_INSPECTED} newest runs read`
-        })
-      }
-
-      return containing
-    }
+    findAppliesContaining: (params) => findAppliesContaining(github, params)
   }
 }
