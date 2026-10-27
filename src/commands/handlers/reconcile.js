@@ -44,7 +44,7 @@ export function createReconcileHandler({
   const requested = createRequestedReconciler(deps)
   const applied = createAppliedReconciler(deps)
 
-  function reconcileState(command, context) {
+  async function reconcileState(command, context) {
     if (command.state === 'requested') {
       return requested(command, context)
     }
