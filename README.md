@@ -64,19 +64,19 @@ The worker and the workflows (`ai-platform-workflows` `src/resources.js`) each f
 
 Read through `convict` (`src/config.js`, `src/config-gitops.js`, `src/config-github.js`). Secrets and CDP configuration live in the CDP Portal and `cdp-app-config`; a change applies on redeploy.
 
-| Variable                                      | Default                         | Meaning                                                                                 |
-| --------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------- |
-| `GITOPS_COMMANDS_QUEUE_URL`                   | none, required                  | `aip_gitops_commands_worker.fifo`, the worker's own queue, consumed                     |
-| `GITOPS_EVENTS_TOPIC_ARN`                     | none, required                  | `aip_gitops_events_worker.fifo`, the worker's own topic, published to by the reconciler |
-| `GITOPS_TENANTS_REPO`                         | `DEFRA/ai-platform-tenants`     | State repository for team files                                                         |
-| `GITOPS_DEPLOYMENTS_REPO`                     | `DEFRA/ai-platform-deployments` | State repository for pins                                                               |
-| `HANDLER_TIMEOUT_MS`                          | `30000`                         | One command, and every outbound call it makes; keep below the 60 s visibility timeout   |
-| `SQS_WAIT_TIME_SECONDS`                       | `20`                            | Long polling                                                                            |
-| `GITOPS_SHUTDOWN_WAIT_MS`                     | `20000`                         | How long a stopping worker waits for the command in flight                              |
-| `AWS_SQS_ENDPOINT`, `AWS_SNS_ENDPOINT`        | unset                           | Local only (Floci)                                                                      |
-| `AWS_REGION`                                  | `eu-west-2`                     |                                                                                         |
-| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID` | none, required                  | The `ai-platform-orchestrator` App                                                      |
-| `GITHUB_APP_PRIVATE_KEY`                      | none, required                  | CDP secret, base64 on one line                                                          |
+| Variable                                      | Default                         | Meaning                                                                                                              |
+| --------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `GITOPS_COMMANDS_QUEUE_URL`                   | none, required                  | `aip_gitops_commands_worker.fifo`, the worker's own queue, consumed                                                  |
+| `GITOPS_EVENTS_TOPIC_ARN`                     | none, required                  | `aip_gitops_events_worker.fifo`, the worker's own topic, published to by the reconciler                              |
+| `GITOPS_TENANTS_REPO`                         | `DEFRA/ai-platform-tenants`     | State repository for team files                                                                                      |
+| `GITOPS_DEPLOYMENTS_REPO`                     | `DEFRA/ai-platform-deployments` | State repository for pins                                                                                            |
+| `HANDLER_TIMEOUT_MS`                          | `30000`                         | One command, and every outbound call it makes; a value at or above the 60 s visibility timeout is refused at startup |
+| `SQS_WAIT_TIME_SECONDS`                       | `20`                            | Long polling                                                                                                         |
+| `GITOPS_SHUTDOWN_WAIT_MS`                     | `20000`                         | How long a stopping worker waits for the command in flight                                                           |
+| `AWS_SQS_ENDPOINT`, `AWS_SNS_ENDPOINT`        | unset                           | Local only (Floci)                                                                                                   |
+| `AWS_REGION`                                  | `eu-west-2`                     |                                                                                                                      |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID` | none, required                  | The `ai-platform-orchestrator` App                                                                                   |
+| `GITHUB_APP_PRIVATE_KEY`                      | none, required                  | CDP secret, base64 on one line                                                                                       |
 
 The worker refuses to start without the commands queue URL, the events topic ARN and the three App settings. Its installation tokens are minted per repository with `actions: write`, `contents: read` and `metadata: read` only, and the client refuses every request except a read and a workflow dispatch. Outbound HTTP goes through the CDP proxy (Node 24 reads `HTTPS_PROXY`); the GitHub API and artifact hosts are allowed in `cdp-tenant-config`.
 

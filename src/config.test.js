@@ -59,6 +59,44 @@ describe('#config', () => {
     vi.unstubAllEnvs()
   })
 
+  // The consumer asks for a 60 s visibility timeout on every message, so a
+  // handler that may run that long could still be working when the message
+  // reaches another worker, and FIFO exclusion would no longer hold.
+  test.each(['120000', '60000'])(
+    'refuses a handler timeout of %s ms, which the queue visibility timeout does not outlast',
+    async (value) => {
+      vi.resetModules()
+      vi.stubEnv('HANDLER_TIMEOUT_MS', value)
+
+      await expect(import('#/config.js')).rejects.toThrow(
+        /handlerTimeoutMs.*below the queue visibility timeout of 60000 ms/
+      )
+
+      vi.unstubAllEnvs()
+    }
+  )
+
+  test('accepts a handler timeout just under the visibility timeout, and the default', async () => {
+    vi.resetModules()
+    vi.stubEnv('HANDLER_TIMEOUT_MS', '59999')
+
+    const { config: fresh } = await import('#/config.js')
+
+    expect(fresh.get('gitops.handlerTimeoutMs')).toBe(59999)
+    expect(config.get('gitops.handlerTimeoutMs')).toBe(30000)
+
+    vi.unstubAllEnvs()
+  })
+
+  test('refuses a handler timeout that is not a whole number of ms', async () => {
+    vi.resetModules()
+    vi.stubEnv('HANDLER_TIMEOUT_MS', 'soon')
+
+    await expect(import('#/config.js')).rejects.toThrow(/handlerTimeoutMs/)
+
+    vi.unstubAllEnvs()
+  })
+
   test('in production logs ECS JSON, redacts headers and still redacts documents and requesters', async () => {
     vi.resetModules()
     vi.stubEnv('NODE_ENV', 'production')

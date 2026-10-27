@@ -1,10 +1,11 @@
 import convict from 'convict'
 import convictFormatWithValidator from 'convict-format-with-validator'
 
-import { gitopsConfigSchema } from '#/config-gitops.js'
+import { gitopsConfigSchema, handlerTimeoutFormat } from '#/config-gitops.js'
 import { githubConfigSchema } from '#/config-github.js'
 
 convict.addFormats(convictFormatWithValidator)
+convict.addFormat(handlerTimeoutFormat)
 convict.addFormat({
   name: 'repository',
   validate(value) {

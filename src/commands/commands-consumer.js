@@ -4,11 +4,12 @@ import {
   CommandRefusedError,
   assertCommandTarget
 } from '#/commands/command-target.js'
+import { QUEUE_VISIBILITY_TIMEOUT_SECONDS } from '#/config-gitops.js'
 import { validateCommand } from '#/contracts/message-validators.js'
 
-// The queue's visibility timeout (60 s, CDP's default) stays above the handler
-// timeout (30 s), so a message is never redelivered while it is being handled.
-const VISIBILITY_TIMEOUT_SECONDS = 60
+// The visibility timeout is above the handler timeout, which configuration
+// refuses to set at or above it, so a message is never redelivered while it is
+// being handled.
 const DEFAULT_ERROR_PAUSE_MS = 10000
 
 function parse(message) {
@@ -153,7 +154,7 @@ export function createCommandsConsumer({
     alwaysAcknowledge: true,
     waitTimeSeconds: settings.waitTimeSeconds,
     visibilityTimeout:
-      settings.visibilityTimeoutSeconds ?? VISIBILITY_TIMEOUT_SECONDS,
+      settings.visibilityTimeoutSeconds ?? QUEUE_VISIBILITY_TIMEOUT_SECONDS,
     authenticationErrorTimeout: settings.errorPauseMs ?? DEFAULT_ERROR_PAUSE_MS,
     handleMessageTimeout: settings.handlerTimeoutMs,
     pollingCompleteWaitTimeMs: settings.shutdownWaitMs,
