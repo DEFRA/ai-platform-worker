@@ -1,7 +1,10 @@
 import { Octokit } from 'octokit'
 
 import { createFakeGitHub } from '../../test/fakes/fake-github-http.js'
-import { RunLookupIncompleteError } from '#/github/github-client.js'
+import {
+  CommitLookupIncompleteError,
+  RunLookupIncompleteError
+} from '#/github/github-client.js'
 import { createOctokitGitHubClient } from '#/github/octokit-github-client.js'
 import { describeGitHubClientContract } from '#/github/github-client-contract.js'
 
@@ -103,6 +106,8 @@ function createHarness() {
     },
     'GET /repos/{owner}/{repo}/commits': ({ params, query }) => {
       const since = Date.parse(query.get('since'))
+      const page = Number(query.get('page') ?? 1)
+      const perPage = Number(query.get('per_page') ?? 30)
 
       return {
         body: (state.commits.get(`${params.owner}/${params.repo}`) ?? [])
@@ -114,6 +119,7 @@ function createHarness() {
           .toSorted(
             (a, b) => Date.parse(b.committedAt) - Date.parse(a.committedAt)
           )
+          .slice((page - 1) * perPage, page * perPage)
           .map((commit) => ({
             sha: commit.sha,
             commit: {
@@ -351,6 +357,75 @@ describe('#octokit-github-client', () => {
 
       await expect(client.listWorkflowRuns(PARAMS)).rejects.toThrow(
         /submit\.yml.*DEFRA\/ai-platform-tenants/
+      )
+    })
+  })
+
+  describe('the commit lookup is paged, bounded and fails closed', () => {
+    const PAGE = 100
+    const MAX_PAGES = 3
+    const COMMITS_ROUTE = 'GET /repos/{owner}/{repo}/commits'
+    const COMMIT_PARAMS = {
+      repository: 'DEFRA/ai-platform-tenants',
+      path: 'environments/infradev/alpha.json',
+      since: '2026-10-26T12:00:00Z'
+    }
+
+    function restCommits(count, message = 'chore: another change') {
+      return Array.from({ length: count }, (_, index) => ({
+        sha: String(index + 1).padStart(40, '0'),
+        commit: {
+          message,
+          committer: { date: '2026-10-26T12:05:00Z' }
+        }
+      }))
+    }
+
+    function clientWithPages(pagesOfCommits) {
+      const pages = []
+      const { client } = clientOver({
+        [COMMITS_ROUTE]: ({ query }) => {
+          const page = Number(query.get('page'))
+
+          pages.push(page)
+
+          return { body: pagesOfCommits[page - 1] ?? [] }
+        }
+      })
+
+      return { client, pages }
+    }
+
+    test('finds the operation commit that lies behind a full first page of newer changes', async () => {
+      const older = restCommits(1, 'feat: write\n\nOperation-Id: op-7f3c9a1e')
+      const { client, pages } = clientWithPages([restCommits(PAGE), older])
+
+      const commits = await client.listCommits(COMMIT_PARAMS)
+
+      expect(pages).toEqual([1, 2])
+      expect(commits).toHaveLength(PAGE + 1)
+      expect(commits.at(-1).message).toContain('Operation-Id: op-7f3c9a1e')
+    })
+
+    test('stops at the page budget and refuses to answer, rather than reading an incomplete search as absence', async () => {
+      const { client, pages } = clientWithPages(
+        Array.from({ length: MAX_PAGES + 1 }, () => restCommits(PAGE))
+      )
+
+      await expect(client.listCommits(COMMIT_PARAMS)).rejects.toBeInstanceOf(
+        CommitLookupIncompleteError
+      )
+      expect(pages).toEqual([1, 2, 3])
+      expect(pages).toHaveLength(MAX_PAGES)
+    })
+
+    test('names the repository and path it could not search to the end', async () => {
+      const { client } = clientWithPages(
+        Array.from({ length: MAX_PAGES }, () => restCommits(PAGE))
+      )
+
+      await expect(client.listCommits(COMMIT_PARAMS)).rejects.toThrow(
+        /environments\/infradev\/alpha\.json.*DEFRA\/ai-platform-tenants/
       )
     })
   })

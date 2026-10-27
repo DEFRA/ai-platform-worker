@@ -1,3 +1,5 @@
+import { Octokit } from 'octokit'
+
 import {
   CDP_REQUEST_ID,
   OPERATION_ID,
@@ -7,12 +9,23 @@ import {
   TRACEPARENT,
   exampleReconcile
 } from '../../../test/fixtures/gitops-messages.js'
+import { createFakeGitHub } from '../../../test/fakes/fake-github-http.js'
+import { createFakeMetrics } from '../../../test/fakes/fake-metrics.js'
+import { createInMemoryEventsPublisher } from '../../../test/fakes/in-memory-events-publisher.js'
 import {
   mainCommit,
   workflowRun
 } from '../../../test/fakes/in-memory-github-client.js'
 import { createWorld } from '../../../test/fakes/world.js'
-import { applyInputs } from '#/github/workflow-dispatcher.js'
+import { createReconcileHandler } from '#/commands/handlers/reconcile.js'
+import { CommitLookupIncompleteError } from '#/github/github-client.js'
+import { createOctokitGitHubClient } from '#/github/octokit-github-client.js'
+import {
+  applyInputs,
+  createWorkflowDispatcher
+} from '#/github/workflow-dispatcher.js'
+import { createCommitFinder } from '#/reconciler/commit-finder.js'
+import { createRunReader } from '#/reconciler/run-reader.js'
 
 const COMMIT_TIME = '2026-10-26T12:00:24Z'
 const OPERATIONS = [{ sha: SHA, operationIds: [OPERATION_ID] }]
@@ -914,6 +927,123 @@ describe('#reconcile handler', () => {
       world.events.failNext(error)
 
       await expect(world.reconcile(requested(), {})).rejects.toBe(error)
+    })
+  })
+
+  describe('the commit lookup reads past a busy path, through the real Octokit client', () => {
+    const COMMITS_ROUTE = 'GET /repos/{owner}/{repo}/commits'
+    const RUNS_ROUTE =
+      'GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs'
+    const DISPATCH_ROUTE =
+      'POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches'
+
+    function newerChanges(count) {
+      return Array.from({ length: count }, (_, index) => ({
+        sha: String(index + 1).padStart(40, '0'),
+        commit: {
+          message: 'chore: another change',
+          committer: { date: '2026-10-26T12:05:00Z' }
+        }
+      }))
+    }
+
+    const operationCommit = {
+      sha: SHA,
+      commit: {
+        message: `Change alpha\n\nOperation-Id: ${OPERATION_ID}`,
+        committer: { date: COMMIT_TIME }
+      }
+    }
+
+    // GitHub as the reconcile reads it: one succeeded submit run, the
+    // path's history in pages of 100, and a record of what was dispatched.
+    function reconcilerOver(history) {
+      const pages = []
+      const dispatches = []
+      const { fetch } = createFakeGitHub({
+        [RUNS_ROUTE]: () => ({
+          body: {
+            workflow_runs: [
+              {
+                id: 25000000001,
+                name: SUBMIT_RUN_NAME,
+                display_title: SUBMIT_RUN_NAME,
+                status: 'completed',
+                conclusion: 'success',
+                event: 'workflow_dispatch',
+                head_sha: SHA,
+                run_attempt: 1,
+                created_at: '2026-10-26T12:00:05Z',
+                updated_at: '2026-10-26T12:00:20Z',
+                html_url: `https://github.com/${TENANTS_REPO}/actions/runs/25000000001`
+              }
+            ]
+          }
+        }),
+        [COMMITS_ROUTE]: ({ query }) => {
+          const page = Number(query.get('page'))
+
+          pages.push(page)
+
+          return { body: history.slice((page - 1) * 100, page * 100) }
+        },
+        [DISPATCH_ROUTE]: ({ body }) => {
+          dispatches.push(body)
+
+          return { body: { workflow_run_id: 1, html_url: 'https://x/1' } }
+        }
+      })
+      const octokit = new Octokit({
+        request: { fetch, retries: 0 },
+        throttle: { enabled: false }
+      })
+      const github = createOctokitGitHubClient({
+        clientFor: () => octokit,
+        retryOptions: { sleep: async () => {}, random: () => 0 }
+      })
+      const events = createInMemoryEventsPublisher()
+      const runReader = createRunReader({ github })
+      const reconcile = createReconcileHandler({
+        github,
+        runReader,
+        commitFinder: createCommitFinder({ github }),
+        dispatcher: createWorkflowDispatcher({
+          github,
+          runReader,
+          metrics: createFakeMetrics()
+        }),
+        events,
+        metrics: createFakeMetrics(),
+        now: () => Date.parse('2026-10-26T12:15:00Z')
+      })
+
+      return { reconcile, pages, dispatches, events }
+    }
+
+    test('recovers the operation commit that lies behind 100 newer changes to the path, and dispatches nothing', async () => {
+      const { reconcile, pages, dispatches, events } = reconcilerOver([
+        ...newerChanges(100),
+        operationCommit
+      ])
+
+      await expect(reconcile(requested(), {})).resolves.toBe('committed')
+      expect(pages).toEqual([1, 2])
+      expect(dispatches).toEqual([])
+      expect(events.events[0]).toMatchObject({ status: 'committed' })
+    })
+
+    test('fails closed when the history fills the page budget, and dispatches nothing', async () => {
+      const { reconcile, pages, dispatches, events } = reconcilerOver([
+        ...newerChanges(300),
+        operationCommit
+      ])
+
+      await expect(reconcile(requested(), {})).rejects.toBeInstanceOf(
+        CommitLookupIncompleteError
+      )
+      expect(pages).toEqual([1, 2, 3])
+      expect(dispatches).toEqual([])
+      expect(events.events).toEqual([])
     })
   })
 })

@@ -1,10 +1,15 @@
 import { retry } from '#/common/helpers/retry.js'
-import { MAIN, RunLookupIncompleteError } from '#/github/github-client.js'
+import {
+  CommitLookupIncompleteError,
+  MAIN,
+  RunLookupIncompleteError
+} from '#/github/github-client.js'
 import { reportOfAttempt } from '#/github/run-report.js'
 
 const PER_PAGE = 100
-// A day of runs of one workflow is well under this; the cap only bounds the
-// worst case so one reconcile cannot spend the rate budget.
+// A day of runs of one workflow, or of commits to one path, is well under
+// this; the cap only bounds the worst case so one reconcile cannot spend the
+// rate budget.
 const MAX_PAGES = 3
 const NOT_FOUND = 404
 const DESCENDANT_STATUSES = new Set(['ahead', 'identical'])
@@ -98,6 +103,36 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
     return data.workflow_runs
   }
 
+  async function listCommitPage(params, page) {
+    const { repository, path, since, signal } = params
+    const { data } = await read(
+      repository,
+      ROUTES.commits,
+      { sha: MAIN, path, since, per_page: PER_PAGE, page },
+      signal
+    )
+
+    return data
+  }
+
+  // Pages are read until one is short; a full page at the budget means more
+  // may lie beyond it, so the caller gets the error, not a partial list.
+  async function readAllPages(readPage, incomplete) {
+    const items = []
+
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const batch = await readPage(page)
+
+      items.push(...batch)
+
+      if (batch.length < PER_PAGE) {
+        return items
+      }
+    }
+
+    throw incomplete()
+  }
+
   return {
     async dispatchWorkflow({ repository, workflowId, inputs, signal }) {
       const { data } = await send(
@@ -119,28 +154,22 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
     },
 
     async listWorkflowRuns(params) {
-      const runs = []
+      const runs = await readAllPages(
+        (page) => listRunPage(params, page),
+        () =>
+          new RunLookupIncompleteError({
+            repository: params.repository,
+            workflowId: params.workflowId,
+            pages: MAX_PAGES
+          })
+      )
 
-      for (let page = 1; page <= MAX_PAGES; page += 1) {
-        const batch = await listRunPage(params, page)
-
-        runs.push(...batch)
-
-        if (batch.length < PER_PAGE) {
-          return runs
-            .map(toRun)
-            .toSorted(
-              (a, b) =>
-                Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id
-            )
-        }
-      }
-
-      throw new RunLookupIncompleteError({
-        repository: params.repository,
-        workflowId: params.workflowId,
-        pages: MAX_PAGES
-      })
+      return runs
+        .map(toRun)
+        .toSorted(
+          (a, b) =>
+            Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id - a.id
+        )
     },
 
     async getRunReport({ repository, runId, runAttempt, environment, signal }) {
@@ -178,15 +207,18 @@ export function createOctokitGitHubClient({ clientFor, retryOptions = {} }) {
       return reportOfAttempt(parseReport(file), runAttempt)
     },
 
-    async listCommits({ repository, path, since, signal }) {
-      const { data } = await read(
-        repository,
-        ROUTES.commits,
-        { sha: MAIN, path, since, per_page: PER_PAGE },
-        signal
+    async listCommits(params) {
+      const commits = await readAllPages(
+        (page) => listCommitPage(params, page),
+        () =>
+          new CommitLookupIncompleteError({
+            repository: params.repository,
+            path: params.path,
+            pages: MAX_PAGES
+          })
       )
 
-      return data.map((commit) => ({
+      return commits.map((commit) => ({
         sha: commit.sha,
         message: commit.commit.message,
         committedAt: commit.commit.committer.date

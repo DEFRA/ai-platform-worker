@@ -36,7 +36,8 @@
  *   the parsed `run-report-{environment}.json` artifact, or null when the run has no unexpired one
  *   that belongs to the attempt (a rerun keeps its run ID, so an earlier attempt's report is on the run too)
  * @property {(params: {repository: string, path: string, since: string, signal?: AbortSignal}) => Promise<MainCommit[]>} listCommits
- *   the commits on `main` that touched `path` since the time, newest first
+ *   the commits on `main` that touched `path` since the time, newest first; throws
+ *   `CommitLookupIncompleteError` when they do not all fit the page budget
  * @property {(params: {repository: string, runId: number, signal?: AbortSignal}) => Promise<string[]>} listRunJobNames
  *   the names of a run's jobs (a reusable workflow's job reads `{caller job} / {job}`)
  * @property {(params: {repository: string, ancestor: string, descendant: string, signal?: AbortSignal}) => Promise<boolean>} isAncestor
@@ -63,6 +64,21 @@ export class RunLookupIncompleteError extends Error {
       `The runs of ${workflowId} in ${repository} fill ${pages} pages, so the search for a run is incomplete`
     )
     this.name = 'RunLookupIncompleteError'
+  }
+}
+
+/**
+ * The commit lookup reached its page budget with a full page, so the commit
+ * may lie beyond it. A caller that dispatches when it finds no commit must
+ * not take the search for complete: the handler fails, and SQS redelivers the
+ * command.
+ */
+export class CommitLookupIncompleteError extends Error {
+  constructor({ repository, path, pages }) {
+    super(
+      `The commits of ${path} in ${repository} fill ${pages} pages, so the search for a commit is incomplete`
+    )
+    this.name = 'CommitLookupIncompleteError'
   }
 }
 
