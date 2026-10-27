@@ -6,6 +6,84 @@ import {
   runPhase
 } from '#/reconciler/status-mapper.js'
 
+async function publish({ events }, event, signal) {
+  await events.publish(event, { signal })
+}
+
+async function reportOf({ github }, command, run, signal) {
+  return github.getRunReport({
+    repository: command.repository,
+    runId: run.id,
+    runAttempt: run.runAttempt,
+    environment: command.environment,
+    signal
+  })
+}
+
+// A commit names the operation: publish `committed` with the run that made it
+// (the newest that succeeded). Without any submit run, submit is dispatched
+// again to report the commit with a run; that is the outcome, `dispatched`.
+async function reportCommit(
+  deps,
+  { command, runs, commit, signal, stamp, logger }
+) {
+  const run =
+    runs.find((candidate) => runPhase(candidate) === 'succeeded') ?? runs[0]
+
+  if (!run) {
+    logger?.warn(
+      { commitSha: commit.sha },
+      'A commit names the operation but no submit run does, so submit was dispatched again to report it with a run'
+    )
+    await deps.dispatcher.dispatchSubmit(command, { signal })
+
+    return 'dispatched'
+  }
+
+  await publish(
+    deps,
+    committedEvent({ command, run, commit, now: stamp }),
+    signal
+  )
+
+  return 'committed'
+}
+
+// No commit: the newest submit run says. Null when it says nothing to report
+// (no run, or one that ended without a failure), so the caller dispatches.
+async function reportLatestRun(deps, { command, runs, signal, stamp }) {
+  const [latest] = runs
+  const phase = latest ? runPhase(latest) : null
+
+  if (phase === 'active') {
+    await publish(
+      deps,
+      requestedEvent({ command, run: latest, now: stamp }),
+      signal
+    )
+
+    return 'requested'
+  }
+
+  if (phase !== 'failed' && phase !== 'succeeded') {
+    return null
+  }
+
+  const report = await reportOf(deps, command, latest, signal)
+
+  if (phase === 'failed' || recordedFailureOf(report, command.operationId)) {
+    await publish(
+      deps,
+      checksFailedEvent({ command, run: latest, report, now: stamp }),
+      signal
+    )
+
+    return 'checks-failed'
+  }
+
+  return null
+}
+
 /**
  * Reconcile a command whose operation is `requested` (plan 5, reconcile
  * table). The worker has no database, so it reads what GitHub holds and
@@ -22,28 +100,8 @@ import {
  * @param {object} deps
  * @returns {(command: object, context: {signal?: AbortSignal, logger?: import('pino').Logger}) => Promise<string>}
  */
-export function createRequestedReconciler({
-  github,
-  runReader,
-  commitFinder,
-  dispatcher,
-  events,
-  now,
-  settings
-}) {
-  async function publish(event, signal) {
-    await events.publish(event, { signal })
-  }
-
-  async function reportOf(command, run, signal) {
-    return github.getRunReport({
-      repository: command.repository,
-      runId: run.id,
-      runAttempt: run.runAttempt,
-      environment: command.environment,
-      signal
-    })
-  }
+export function createRequestedReconciler(deps) {
+  const { runReader, commitFinder, dispatcher, now, settings } = deps
 
   return async function reconcileRequested(command, { signal, logger }) {
     const since = new Date(now() - settings.reconcileLookbackMs).toISOString()
@@ -60,56 +118,13 @@ export function createRequestedReconciler({
       since,
       signal
     })
-    const stamp = new Date(now())
+    const facts = { command, runs, signal, stamp: new Date(now()) }
+    const outcome = commit
+      ? await reportCommit(deps, { ...facts, commit, logger })
+      : await reportLatestRun(deps, facts)
 
-    if (commit) {
-      // The run that made the commit: the newest that succeeded.
-      const run =
-        runs.find((candidate) => runPhase(candidate) === 'succeeded') ?? runs[0]
-
-      if (!run) {
-        logger?.warn(
-          { commitSha: commit.sha },
-          'A commit names the operation but no submit run does, so submit was dispatched again to report it with a run'
-        )
-        await dispatcher.dispatchSubmit(command, { signal })
-
-        return 'dispatched'
-      }
-
-      await publish(
-        committedEvent({ command, run, commit, now: stamp }),
-        signal
-      )
-
-      return 'committed'
-    }
-
-    const [latest] = runs
-
-    if (latest && runPhase(latest) === 'active') {
-      await publish(
-        requestedEvent({ command, run: latest, now: stamp }),
-        signal
-      )
-
-      return 'requested'
-    }
-
-    if (latest && ['failed', 'succeeded'].includes(runPhase(latest))) {
-      const report = await reportOf(command, latest, signal)
-
-      if (
-        runPhase(latest) === 'failed' ||
-        recordedFailureOf(report, command.operationId)
-      ) {
-        await publish(
-          checksFailedEvent({ command, run: latest, report, now: stamp }),
-          signal
-        )
-
-        return 'checks-failed'
-      }
+    if (outcome) {
+      return outcome
     }
 
     await dispatcher.dispatchSubmit(command, { signal })
