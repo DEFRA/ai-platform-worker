@@ -64,15 +64,16 @@ export function createRunReader({ github }) {
       return false
     }
 
-    return (
-      run.headSha === commit.sha ||
-      (await github.isAncestor({
-        repository,
-        ancestor: commit.sha,
-        descendant: run.headSha,
-        signal
-      }))
-    )
+    if (run.headSha === commit.sha) {
+      return true
+    }
+
+    return github.isAncestor({
+      repository,
+      ancestor: commit.sha,
+      descendant: run.headSha,
+      signal
+    })
   }
 
   async function submitRunsOf({
