@@ -49,6 +49,20 @@ describe('#message-validators', () => {
       expect(JSON.stringify(errors)).not.toContain('Jo Bloggs')
     })
 
+    test('accepts a reconcile from requested with the time of its submission, and refuses one on a submit', () => {
+      const submittedAt = '2026-10-26T12:09:30Z'
+
+      expect(
+        validateCommand(exampleReconcile('requested', { submittedAt })).valid
+      ).toBe(true)
+      expect(validateCommand(exampleCommand({ submittedAt })).valid).toBe(false)
+      expect(
+        validateCommand(
+          exampleReconcile('requested', { submittedAt: 'yesterday' })
+        ).valid
+      ).toBe(false)
+    })
+
     test('refuses a reconcile with no state', () => {
       expect(
         validateCommand(exampleReconcile('requested', { state: undefined }))
