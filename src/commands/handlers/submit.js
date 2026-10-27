@@ -1,25 +1,5 @@
 import { createdFromOf } from '#/github/workflow-dispatcher.js'
-
-/**
- * Whether a submit run of the command's operation can be the command's own.
- * The run-name carries the operation, not the command, so a resubmission is
- * told from an earlier attempt's run by time. A retry is created only after
- * the earlier run's failure, and commands are FIFO per team, so a run that
- * had completed before the command was created cannot be the command's, even
- * when its creation time falls inside the lookback that allows for clock
- * skew. A run still going, or completed at or after the command's creation,
- * can be. The comparison is exact: skew is allowed for only when looking for
- * a run created, not when ruling one out.
- * @param {import('#/github/github-client.js').WorkflowRun} run
- * @param {{createdAt: string}} command
- * @returns {boolean}
- */
-function canBeRunOf(run, command) {
-  return (
-    run.status !== 'completed' ||
-    Date.parse(run.updatedAt) >= Date.parse(command.createdAt)
-  )
-}
+import { canBeRunSubmittedAt } from '#/reconciler/run-timing.js'
 
 /**
  * The `submit` handler (plan 6.1): looks for a submit run with
@@ -43,7 +23,9 @@ export function createSubmitHandler({ runReader, dispatcher }) {
       createdFrom: createdFromOf(command),
       signal
     })
-    const existing = runs.find((run) => canBeRunOf(run, command))
+    const existing = runs.find((run) =>
+      canBeRunSubmittedAt(run, command.createdAt)
+    )
 
     if (existing) {
       logger?.info(

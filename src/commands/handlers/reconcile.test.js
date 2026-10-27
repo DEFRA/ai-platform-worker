@@ -195,6 +195,117 @@ describe('#reconcile handler', () => {
       expect(world.github.dispatches).toEqual([])
     })
 
+    describe('submittedAt: the time the operation was last submitted', () => {
+      const SUBMITTED_AT = '2026-10-26T12:08:00Z'
+      const handledRefusal = {
+        events: [
+          {
+            operationId: OPERATION_ID,
+            status: 'checks-failed',
+            failureReason: {
+              code: 'stale-revision',
+              message: 'The file moved.',
+              retryable: true
+            }
+          }
+        ]
+      }
+
+      function seedRefusedRun(world, runTimes) {
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          submitRun({ conclusion: 'failure', ...runTimes })
+        ])
+        world.github.seedReport(
+          TENANTS_REPO,
+          25000000001,
+          'infradev',
+          handledRefusal
+        )
+      }
+
+      test('a resubmission that never reached GitHub after a handled retryable refusal: dispatches submit again and publishes nothing stale', async () => {
+        const world = createWorld()
+        const command = { ...requested(), submittedAt: SUBMITTED_AT }
+
+        seedRefusedRun(world, {
+          createdAt: '2026-10-26T12:00:05Z',
+          updatedAt: '2026-10-26T12:00:40Z'
+        })
+
+        await expect(world.reconcile(command, context(world))).resolves.toBe(
+          'dispatched'
+        )
+        expect(world.events.events).toEqual([])
+        expect(world.github.dispatches).toHaveLength(1)
+        expect(world.github.dispatches[0]).toMatchObject({
+          workflowId: 'submit.yml',
+          inputs: { operation_id: OPERATION_ID }
+        })
+      })
+
+      test('a refusal from a run that finished after submittedAt is still reported', async () => {
+        const world = createWorld()
+        const command = { ...requested(), submittedAt: SUBMITTED_AT }
+
+        seedRefusedRun(world, {
+          createdAt: '2026-10-26T12:08:10Z',
+          updatedAt: '2026-10-26T12:08:50Z'
+        })
+
+        await expect(world.reconcile(command, context(world))).resolves.toBe(
+          'checks-failed'
+        )
+        expect(world.events.events[0].failureReason.code).toBe('stale-revision')
+        expect(world.github.dispatches).toEqual([])
+      })
+
+      test('a run that finished exactly at submittedAt can be the resubmission’s: the comparison allows no slack either way', async () => {
+        const world = createWorld()
+        const command = { ...requested(), submittedAt: SUBMITTED_AT }
+
+        seedRefusedRun(world, {
+          createdAt: '2026-10-26T12:07:00Z',
+          updatedAt: SUBMITTED_AT
+        })
+
+        await expect(world.reconcile(command, context(world))).resolves.toBe(
+          'checks-failed'
+        )
+      })
+
+      test('a run still going is reported whenever it began', async () => {
+        const world = createWorld()
+        const command = { ...requested(), submittedAt: SUBMITTED_AT }
+
+        world.github.seedRuns(TENANTS_REPO, 'submit.yml', [
+          submitRun({
+            status: 'in_progress',
+            conclusion: null,
+            createdAt: '2026-10-26T12:00:05Z',
+            updatedAt: '2026-10-26T12:00:05Z'
+          })
+        ])
+
+        await expect(world.reconcile(command, context(world))).resolves.toBe(
+          'requested'
+        )
+      })
+
+      test('without submittedAt an earlier refusal is reported as before', async () => {
+        const world = createWorld()
+
+        seedRefusedRun(world, {
+          createdAt: '2026-10-26T12:00:05Z',
+          updatedAt: '2026-10-26T12:00:40Z'
+        })
+
+        await expect(
+          world.reconcile(requested(), context(world))
+        ).resolves.toBe('checks-failed')
+        expect(world.github.dispatches).toEqual([])
+      })
+    })
+
     test('a run that ended successfully but recorded a refusal: publishes the refusal', async () => {
       const world = createWorld()
 
