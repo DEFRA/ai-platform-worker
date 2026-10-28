@@ -2,7 +2,7 @@ services:
   # floci is a replacement for localstack. It emulates AWS resources (sqs, sns, s3 etc) for local development
   # See: https://floci.io for more details
   floci:
-    image: hectorvent/floci:latest-aws
+    image: floci/floci:2.3.0-compat@sha256:ecfd33bb98d3e0ce0e11d528730f0827c08ab18c9b331865203d67ec65c10c07
     ports:
       - '4566:4566'
     env_file:
@@ -14,29 +14,6 @@ services:
     networks:
       - cdp-tenant
 
-  redis:
-    image: redis:7.2.3-alpine3.18
-    ports:
-      - '6379:6379'
-    networks:
-      - cdp-tenant
-
-  mongodb:
-    image: mongo:7.0.28
-    networks:
-      - cdp-tenant
-    ports:
-      - '27017:27017'
-    volumes:
-      - ./compose/mongo:/docker-entrypoint-initdb.d:ro
-      - mongodb-data:/data
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.hello().ok"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
   ################################################################################
 
   ai-platform-worker:
@@ -47,18 +24,23 @@ services:
       - '3001:3001'
     links:
       - 'floci:floci'
-      - 'mongodb:mongodb'
     depends_on:
       floci:
-        condition: service_healthy
-      mongodb:
         condition: service_started
     env_file:
       - 'compose/aws.env'
     environment:
       PORT: 3001
       NODE_ENV: development
-      MONGO_URI: mongodb://mongodb:27017/
+      AWS_SQS_ENDPOINT: http://floci:4566
+      AWS_SNS_ENDPOINT: http://floci:4566
+      GITOPS_COMMANDS_QUEUE_URL: http://floci:4566/000000000000/aip_gitops_commands_worker.fifo
+      GITOPS_EVENTS_TOPIC_ARN: arn:aws:sns:eu-west-2:000000000000:aip_gitops_events_worker.fifo
+      # The GitHub App credentials are not set here: pass GITHUB_APP_ID,
+      # GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY from your shell.
+      GITHUB_APP_ID:
+      GITHUB_APP_INSTALLATION_ID:
+      GITHUB_APP_PRIVATE_KEY:
     networks:
       - cdp-tenant
     volumes:
@@ -66,9 +48,6 @@ services:
       - ./package.json:/home/node/package.json
 
 ################################################################################
-
-volumes:
-  mongodb-data:
 
 networks:
   cdp-tenant:

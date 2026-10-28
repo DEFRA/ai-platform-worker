@@ -11,6 +11,8 @@
     "dev": "AWS_EMF_ENVIRONMENT=Local NODE_ENV=development npm run server:watch",
     "dev:debug": "AWS_EMF_ENVIRONMENT=Local NODE_ENV=development npm run server:debug",
     "docker:dev": "npm run dev",
+    "contracts:check": "node scripts/contracts.mjs check",
+    "contracts:sync": "node scripts/contracts.mjs sync",
     "format": "prettier --write \"**/*.{cjs,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{cjs,js,json,md}\"",
     "git:pre-commit-hook": "npm run security-audit && npm run format:check && npm run lint && npm test",
@@ -30,6 +32,8 @@
   "author": "Defra DDTS",
   "license": "OGL-UK-3.0",
   "dependencies": {
+    "@aws-sdk/client-sns": "3.1152.0",
+    "@aws-sdk/client-sqs": "3.1152.0",
     "@aws-sdk/credential-providers": "3.1152.0",
     "@defra/cdp-auditing": "0.6.2",
     "@defra/cdp-metrics": "0.6.1",
@@ -38,26 +42,25 @@
     "@elastic/ecs-pino-format": "1.5.0",
     "@hapi/boom": "10.0.1",
     "@hapi/hapi": "21.4.10",
-    "aws4": "1.13.2",
+    "@octokit/auth-app": "8.3.1",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "convict": "6.2.5",
     "convict-format-with-validator": "6.2.0",
     "hapi-pino": "13.0.0",
     "hapi-pulse": "4.0.0",
-    "joi": "18.2.9",
-    "mongo-locks": "3.2.0",
-    "mongodb": "7.7.0",
+    "octokit": "5.0.5",
     "pino": "10.4.0",
-    "pino-pretty": "13.2.0"
+    "pino-pretty": "13.2.0",
+    "sqs-consumer": "15.0.4"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "4.1.11",
     "eslint": "9.39.5",
     "husky": "9.1.7",
     "neostandard": "0.13.0",
-    "npm-run-all": "4.1.5",
     "prettier": "3.9.10",
     "vitest": "4.1.11",
-    "vitest-fetch-mock": "0.4.5",
-    "vitest-mongodb": "1.0.3"
+    "vitest-fetch-mock": "0.4.5"
   }
 }
