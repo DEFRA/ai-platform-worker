@@ -63,5 +63,9 @@
     "prettier": "3.9.10",
     "vitest": "4.1.12",
     "vitest-fetch-mock": "0.4.5"
+  },
+  "overrides": {
+    "joi": "$joi",
+    "minimatch": "11.0.1"
   }
 }
