@@ -60,7 +60,7 @@
     "eslint": "9.39.5",
     "husky": "9.1.7",
     "neostandard": "0.14.1",
-    "prettier": "3.9.10",
+    "prettier": "3.10.1",
     "vitest": "5.1.0",
     "vitest-fetch-mock": "0.4.5"
   },
